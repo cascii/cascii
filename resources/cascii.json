@@ -5,6 +5,7 @@
     "large":   { "columns": 800, "fps": 60, "font_ratio": 0.7, "luminance": 20 }
   },
   "default_preset": "default",
-  "ascii_chars": " .`'^,:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$"
+  "ascii_chars": " .`'^,:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$",
+  "default_start": "0",
+  "default_end": ""
 }
-

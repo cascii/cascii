@@ -26,6 +26,8 @@ struct AppConfig {
     presets: std::collections::HashMap<String, Preset>,
     default_preset: String,
     ascii_chars: String,
+    default_start: String,
+    default_end: String,
 }
 
 fn load_config() -> Result<AppConfig> {
@@ -54,7 +56,9 @@ fn load_config() -> Result<AppConfig> {
             "large":   {"columns": 800, "fps": 60, "font_ratio": 0.7, "luminance": 1}
         },
         "default_preset": "default",
-        "ascii_chars": " .`'^,:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$"
+        "ascii_chars": " .`'^,:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$",
+        "default_start": "0",
+        "default_end": ""
     }"#;
     let cfg: AppConfig = serde_json::from_str(default_json).unwrap();
     Ok(cfg)
@@ -295,7 +299,7 @@ fn main() -> Result<()> {
                 args.start = Some(
                     Input::new()
                         .with_prompt("Start time (e.g., 00:00:05)")
-                        .default("0".to_string())
+                        .default(cfg.default_start.clone())
                         .interact()?,
                 );
             }
@@ -303,6 +307,7 @@ fn main() -> Result<()> {
                 args.end = Some(
                     Input::new()
                         .with_prompt("End time (e.g., 00:00:10) (optional)")
+                        .default(cfg.default_end.clone())
                         .interact()?,
                 );
             }
