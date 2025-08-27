@@ -24,6 +24,15 @@ sudo cp "$SOURCE_PATH" "$INSTALL_DIR/$BINARY_NAME"
 echo "Creating backward-compatible 'casci' symlink..."
 sudo ln -sf "$INSTALL_DIR/$BINARY_NAME" "$INSTALL_DIR/casci"
 
+# Install default config if not present
+CONFIG_DIR="$APP_SUPPORT_DIR"
+CONFIG_PATH="$CONFIG_DIR/cascii.json"
+if [ ! -f "$CONFIG_PATH" ]; then
+    echo "Installing default config to $CONFIG_PATH..."
+    mkdir -p "$CONFIG_DIR"
+    cp "$REPO_DIR/resources/cascii.json" "$CONFIG_PATH"
+fi
+
 # Determine shell configuration file
 SHELL_CONFIG=""
 if [[ "$SHELL" == */zsh ]]; then
