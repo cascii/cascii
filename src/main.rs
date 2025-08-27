@@ -7,10 +7,62 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcCommand;
 use std::collections::{HashMap};
+use serde::{Deserialize};
 use walkdir::WalkDir;
 
 /// Characters from darkest to lightest.
-const ASCII_CHARS: &str = " .`'^,:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
+// Character set now configurable via JSON config; kept no global default here.
+
+#[derive(Debug, Deserialize, Clone)]
+struct Preset {
+    columns: u32,
+    fps: u32,
+    font_ratio: f32,
+    luminance: u8,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct AppConfig {
+    presets: std::collections::HashMap<String, Preset>,
+    default_preset: String,
+    ascii_chars: String,
+    default_start: String,
+    default_end: String,
+}
+
+fn load_config() -> Result<AppConfig> {
+    // Look for cascii.json in app support, current dir fallback, then built-in default
+    let mut tried: Vec<PathBuf> = Vec::new();
+    if let Some(mut d) = dirs::data_dir() {
+        d.push("cascii");
+        d.push("cascii.json");
+        tried.push(d);
+    }
+    tried.push(PathBuf::from("cascii.json"));
+
+    for p in &tried {
+        if p.exists() {
+            let text = fs::read_to_string(p).with_context(|| format!("reading config {}", p.display()))?;
+            let cfg: AppConfig = serde_json::from_str(&text).context("parsing config json")?;
+            return Ok(cfg);
+        }
+    }
+
+    // Built-in defaults
+    let default_json = r#"{
+        "presets": {
+            "default": {"columns": 800, "fps": 30, "font_ratio": 0.7, "luminance": 1},
+            "small":   {"columns": 80,  "fps": 24, "font_ratio": 0.44, "luminance": 1},
+            "large":   {"columns": 800, "fps": 60, "font_ratio": 0.7, "luminance": 1}
+        },
+        "default_preset": "default",
+        "ascii_chars": " .`'^,:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$",
+        "default_start": "0",
+        "default_end": ""
+    }"#;
+    let cfg: AppConfig = serde_json::from_str(default_json).unwrap();
+    Ok(cfg)
+}
 
 #[derive(Subcommand, Debug)]
 enum Command {
@@ -183,16 +235,27 @@ fn main() -> Result<()> {
         output_path.push(file_stem);
     }
 
-    // Quality defaults based on flags
-    let (default_cols, default_fps, default_ratio) = if args.small {
-        (80, 24, 0.44)
+    // Load config and decide preset
+    let cfg = load_config()?;
+    let active_preset_name = if args.small {
+        "small"
     } else if args.large {
-        (800, 60, 0.7)
+        "large"
     } else if args.default {
-        (200, 24, 0.5)
+        cfg.default_preset.as_str()
     } else {
-        (800, 30, 0.7)
+        // interactive default uses the configured default preset
+        cfg.default_preset.as_str()
     };
+    let active = cfg
+        .presets
+        .get(active_preset_name)
+        .ok_or_else(|| anyhow!(format!("Missing preset '{}' in config", active_preset_name)))?;
+    let default_cols = active.columns;
+    let default_fps = active.fps;
+    let default_ratio = active.font_ratio;
+    let ascii_chars_owned = cfg.ascii_chars.clone();
+    let ascii_chars = ascii_chars_owned.as_bytes();
 
     if is_interactive {
         if args.columns.is_none() {
@@ -217,7 +280,7 @@ fn main() -> Result<()> {
             args.luminance = Some(
                 Input::new()
                     .with_prompt("Luminance threshold")
-                    .default(1u8)
+                    .default(20u8)
                     .interact()?,
             );
         }
@@ -236,7 +299,7 @@ fn main() -> Result<()> {
                 args.start = Some(
                     Input::new()
                         .with_prompt("Start time (e.g., 00:00:05)")
-                        .default("0".to_string())
+                        .default(cfg.default_start.clone())
                         .interact()?,
                 );
             }
@@ -244,6 +307,7 @@ fn main() -> Result<()> {
                 args.end = Some(
                     Input::new()
                         .with_prompt("End time (e.g., 00:00:10) (optional)")
+                        .default(cfg.default_end.clone())
                         .interact()?,
                 );
             }
@@ -253,7 +317,7 @@ fn main() -> Result<()> {
     let columns = args.columns.unwrap_or(default_cols);
     let fps = args.fps.unwrap_or(default_fps);
     let font_ratio = args.font_ratio.unwrap_or(default_ratio);
-    let luminance = args.luminance.unwrap_or(1);
+    let luminance = args.luminance.unwrap_or(active.luminance);
 
     // --- Execution ---
     fs::create_dir_all(&output_path).context("creating output dir")?;
@@ -322,6 +386,7 @@ fn main() -> Result<()> {
             font_ratio,
             luminance,
             args.keep_images,
+            ascii_chars,
         )?;
     } else if input_path.is_dir() {
         convert_dir_pngs_parallel(
@@ -330,6 +395,7 @@ fn main() -> Result<()> {
             font_ratio,
             luminance,
             args.keep_images,
+            ascii_chars,
         )?;
     } else {
         return Err(anyhow!("Input path does not exist"));
@@ -381,12 +447,16 @@ fn process_single_image(
     let out_txt = output_path.join(format!("{}.txt", file_stem));
 
     println!("Converting image to ASCII...");
+    // Load ascii chars once
+    let cfg = load_config()?;
+    let ascii_chars = cfg.ascii_chars.as_bytes();
     convert_image_to_ascii(
         input_path,
         &out_txt,
         font_ratio,
         luminance,
         Some(columns),
+        ascii_chars,
     )?;
 
     println!("\nASCII generation complete in {}", output_path.display());
@@ -491,7 +561,7 @@ fn run_ffmpeg_extract(
     Ok(())
 }
 
-fn convert_dir_pngs_parallel(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, keep_images: bool) -> Result<()> {
+fn convert_dir_pngs_parallel(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, keep_images: bool, ascii_chars: &[u8]) -> Result<()> {
     fs::create_dir_all(dst_dir)?;
     let mut pngs: Vec<PathBuf> = WalkDir::new(src_dir)
         .min_depth(1)
@@ -519,7 +589,7 @@ fn convert_dir_pngs_parallel(src_dir: &Path, dst_dir: &Path, font_ratio: f32, th
                 .and_then(|s| s.to_str())
                 .ok_or_else(|| anyhow!("bad file name"))?;
             let out_txt = dst_dir.join(format!("{}.txt", file_stem));
-            convert_image_to_ascii(img_path, &out_txt, font_ratio, threshold, None)
+            convert_image_to_ascii(img_path, &out_txt, font_ratio, threshold, None, ascii_chars)
         })?;
 
     if !keep_images {
@@ -537,6 +607,7 @@ fn convert_image_to_ascii(
     font_ratio: f32,
     threshold: u8,
     columns: Option<u32>,
+    ascii_chars: &[u8],
 ) -> Result<()> {
     let mut img = image::open(img_path)
         .with_context(|| format!("opening {}", img_path.display()))?
@@ -561,7 +632,7 @@ fn convert_image_to_ascii(
         for x in 0..w {
             let px = img.get_pixel(x, y);
             let l = luminance(*px);
-            out.push(char_for(l, threshold));
+            out.push(char_for(l, threshold, ascii_chars));
         }
         out.push('\n');
     }
@@ -576,11 +647,11 @@ fn luminance(rgb: image::Rgb<u8>) -> u8 {
     (0.2126 * r + 0.7152 * g + 0.0722 * b).round() as u8
 }
 
-fn char_for(luma: u8, threshold: u8) -> char {
+fn char_for(luma: u8, threshold: u8, ascii_chars: &[u8]) -> char {
     if luma < threshold {
         return ' ';
     }
-    let chars = ASCII_CHARS.as_bytes();
+    let chars = ascii_chars;
     let idx = (((luma.saturating_sub(threshold)) as f32 / (255u16.saturating_sub(threshold as u16) as f32))
         * ((chars.len() - 1) as f32))
         .clamp(0.0, (chars.len() - 1) as f32)

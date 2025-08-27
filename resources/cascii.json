@@ -1,0 +1,11 @@
+{
+  "presets": {
+    "default": { "columns": 400, "fps": 30, "font_ratio": 0.7, "luminance": 20 },
+    "small":   { "columns": 80,  "fps": 24, "font_ratio": 0.44, "luminance": 20 },
+    "large":   { "columns": 800, "fps": 60, "font_ratio": 0.7, "luminance": 20 }
+  },
+  "default_preset": "default",
+  "ascii_chars": " .`'^,:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$",
+  "default_start": "0",
+  "default_end": ""
+}
