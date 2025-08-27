@@ -280,7 +280,7 @@ fn main() -> Result<()> {
             args.luminance = Some(
                 Input::new()
                     .with_prompt("Luminance threshold")
-                    .default(1u8)
+                    .default(20u8)
                     .interact()?,
             );
         }
