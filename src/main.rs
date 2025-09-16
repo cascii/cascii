@@ -21,13 +21,20 @@ struct Preset {
     luminance: u8,
 }
 
+fn default_ascii_chars() -> String {
+    " .`'^,:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$".to_string()
+}
+
+fn default_start_str() -> String { "0".to_string() }
+fn default_end_str() -> String { String::new() }
+
 #[derive(Debug, Deserialize, Clone)]
 struct AppConfig {
     presets: std::collections::HashMap<String, Preset>,
     default_preset: String,
-    ascii_chars: String,
-    default_start: String,
-    default_end: String,
+    #[serde(default = "default_ascii_chars")] ascii_chars: String,
+    #[serde(default = "default_start_str")] default_start: String,
+    #[serde(default = "default_end_str")] default_end: String,
 }
 
 fn load_config() -> Result<AppConfig> {
