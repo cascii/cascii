@@ -1,6 +1,5 @@
-//! Example: Convert a video to ASCII frames using cascii as a library
-//!
-//! Run with: cargo run --example simple_video
+// Example: Convert a video to ASCII frames using cascii as a library
+// Run with: cargo run --example simple_video
 
 use cascii::{AsciiConverter, ConversionOptions, VideoOptions};
 use std::path::Path;
@@ -49,4 +48,3 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-
