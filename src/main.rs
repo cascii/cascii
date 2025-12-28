@@ -22,7 +22,7 @@ struct Preset {
 }
 
 fn default_ascii_chars() -> String {
-    " .`'^,:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$".to_string()
+    " .'`^,:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$".to_string()
 }
 
 fn default_start_str() -> String { "0".to_string() }
@@ -51,6 +51,16 @@ fn load_config() -> Result<AppConfig> {
         if p.exists() {
             let text = fs::read_to_string(p).with_context(|| format!("reading config {}", p.display()))?;
             let cfg: AppConfig = serde_json::from_str(&text).context("parsing config json")?;
+            
+            // Validate that ascii_chars contains only ASCII characters
+            if !cfg.ascii_chars.is_ascii() {
+                return Err(anyhow!(
+                    "Config file {} contains non-ASCII characters in ascii_chars field. \
+                    This will cause corrupted output. Please use only ASCII characters.",
+                    p.display()
+                ));
+            }
+            
             return Ok(cfg);
         }
     }
@@ -63,7 +73,7 @@ fn load_config() -> Result<AppConfig> {
             "large":   {"columns": 800, "fps": 60, "font_ratio": 0.7, "luminance": 1}
         },
         "default_preset": "default",
-        "ascii_chars": " .`'^,:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$",
+        "ascii_chars": " .'`^,:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$",
         "default_start": "0",
         "default_end": ""
     }"#;
@@ -420,8 +430,8 @@ fn main() -> Result<()> {
         .count();
 
     let mut details = format!(
-        "Frames: {}\nLuminance: {}\nFont Ratio: {}\nColumns: {}",
-        frame_count, luminance, font_ratio, columns
+        "Version: {}\nFrames: {}\nLuminance: {}\nFont Ratio: {}\nColumns: {}",
+        env!("CARGO_PKG_VERSION"), frame_count, luminance, font_ratio, columns
     );
 
     if input_path.is_file() && !is_image_input {
@@ -469,8 +479,8 @@ fn process_single_image(
     println!("\nASCII generation complete in {}", output_path.display());
 
     let details = format!(
-        "Luminance: {}\nFont Ratio: {}\nColumns: {}",
-        luminance, font_ratio, columns
+        "Version: {}\nLuminance: {}\nFont Ratio: {}\nColumns: {}",
+        env!("CARGO_PKG_VERSION"), luminance, font_ratio, columns
     );
     let details_path = output_path.join("details.md");
     fs::write(details_path, &details).context("writing details file")?;
@@ -620,22 +630,25 @@ fn convert_image_to_ascii(
         .with_context(|| format!("opening {}", img_path.display()))?
         .to_rgb8();
 
-    if let Some(new_w) = columns {
-        let (w, h) = img.dimensions();
-        if new_w != w {
-            let new_h = (h as f32 * (new_w as f32 / w as f32)).round() as u32;
-            img = image::imageops::resize(&img, new_w, new_h, image::imageops::FilterType::Triangle);
-        }
+    let (orig_w, orig_h) = img.dimensions();
+    let (target_w, target_h) = if let Some(cols) = columns {
+        let w = cols;
+        let h = (orig_h as f32 / orig_w as f32 * cols as f32 * font_ratio).round() as u32;
+        (w, h.max(1))
+    } else {
+        let w = orig_w;
+        let h = (orig_h as f32 * font_ratio).round() as u32;
+        (w, h.max(1))
+    };
+
+    if target_w != orig_w || target_h != orig_h {
+        let dyn_img = image::DynamicImage::ImageRgb8(img);
+        img = dyn_img.resize_exact(target_w, target_h, image::imageops::FilterType::Lanczos3).to_rgb8();
     }
 
     let (w, h) = img.dimensions();
-    let new_h = ((h as f32) * font_ratio).max(1.0).round() as u32;
-    if new_h != h {
-        img = image::imageops::resize(&img, w, new_h, image::imageops::FilterType::Triangle);
-    }
-
-    let mut out = String::with_capacity((w as usize + 1) * (new_h as usize));
-    for y in 0..new_h {
+    let mut out = String::with_capacity((w as usize + 1) * (h as usize));
+    for y in 0..h {
         for x in 0..w {
             let px = img.get_pixel(x, y);
             let l = luminance(*px);
@@ -648,22 +661,25 @@ fn convert_image_to_ascii(
 }
 
 fn luminance(rgb: image::Rgb<u8>) -> u8 {
-    let r = rgb[0] as f32;
-    let g = rgb[1] as f32;
-    let b = rgb[2] as f32;
-    (0.2126 * r + 0.7152 * g + 0.0722 * b).round() as u8
+    let r = rgb[0] as f64;
+    let g = rgb[1] as f64;
+    let b = rgb[2] as f64;
+    (0.2126 * r + 0.7152 * g + 0.0722 * b) as u8
 }
 
 fn char_for(luma: u8, threshold: u8, ascii_chars: &[u8]) -> char {
     if luma < threshold {
         return ' ';
     }
-    let chars = ascii_chars;
-    let idx = (((luma.saturating_sub(threshold)) as f32 / (255u16.saturating_sub(threshold as u16) as f32))
-        * ((chars.len() - 1) as f32))
-        .clamp(0.0, (chars.len() - 1) as f32)
-        as usize;
-    chars[idx] as char
+    
+    let effective_luma = (luma as u32).saturating_sub(threshold as u32);
+    let range = (255u32).saturating_sub(threshold as u32).max(1);
+    let num_chars_minus_1 = (ascii_chars.len() as u32).saturating_sub(1);
+    
+    let idx = (effective_luma * num_chars_minus_1) / range;
+    let idx = idx.min(num_chars_minus_1) as usize;
+    
+    ascii_chars[idx] as char
 }
 
 fn run_uninstall(is_interactive: bool) -> Result<()> {
