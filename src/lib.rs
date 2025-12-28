@@ -243,7 +243,12 @@ impl AsciiConverter {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn convert_image(&self, input: &Path, output: &Path, options: &ConversionOptions) -> Result<()> {
+    pub fn convert_image(
+        &self,
+        input: &Path,
+        output: &Path,
+        options: &ConversionOptions,
+    ) -> Result<()> {
         let ascii_chars = options.ascii_chars.as_bytes();
         convert_image_to_ascii(
             input,
@@ -406,9 +411,9 @@ fn convert_image_to_ascii(
     columns: Option<u32>,
     ascii_chars: &[u8],
 ) -> Result<()> {
-    let ascii_string = image_to_ascii_string(img_path, font_ratio, threshold, columns, ascii_chars)?;
-    fs::write(out_txt, ascii_string)
-        .with_context(|| format!("writing {}", out_txt.display()))?;
+    let ascii_string =
+        image_to_ascii_string(img_path, font_ratio, threshold, columns, ascii_chars)?;
+    fs::write(out_txt, ascii_string).with_context(|| format!("writing {}", out_txt.display()))?;
     Ok(())
 }
 
@@ -536,12 +541,9 @@ fn extract_video_frames(
 }
 
 fn parse_timestamp(s: &str) -> f64 {
-    s.split(':')
-        .rev()
-        .enumerate()
-        .fold(0.0, |acc, (i, v)| {
-            acc + v.parse::<f64>().unwrap_or(0.0) * 60f64.powi(i as i32)
-        })
+    s.split(':').rev().enumerate().fold(0.0, |acc, (i, v)| {
+        acc + v.parse::<f64>().unwrap_or(0.0) * 60f64.powi(i as i32)
+    })
 }
 
 fn convert_directory_parallel(
@@ -563,15 +565,14 @@ fn convert_directory_parallel(
         .collect();
     pngs.sort();
 
-    pngs.par_iter()
-        .try_for_each(|img_path| -> Result<()> {
-            let file_stem = img_path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .ok_or_else(|| anyhow!("bad file name"))?;
-            let out_txt = dst_dir.join(format!("{}.txt", file_stem));
-            convert_image_to_ascii(img_path, &out_txt, font_ratio, threshold, None, ascii_chars)
-        })?;
+    pngs.par_iter().try_for_each(|img_path| -> Result<()> {
+        let file_stem = img_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| anyhow!("bad file name"))?;
+        let out_txt = dst_dir.join(format!("{}.txt", file_stem));
+        convert_image_to_ascii(img_path, &out_txt, font_ratio, threshold, None, ascii_chars)
+    })?;
 
     if !keep_images {
         for img_path in &pngs {
@@ -581,4 +582,3 @@ fn convert_directory_parallel(
 
     Ok(())
 }
-

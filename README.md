@@ -19,6 +19,8 @@ I recommend installing [cascii-viewer](https://github.com/cascii/cascii-viewer) 
 
 ## Installation
 
+### As a CLI Tool
+
 An `install.sh` script is provided to build and install `cascii` to `/usr/local/bin`.
 
 ```bash
@@ -27,6 +29,23 @@ An `install.sh` script is provided to build and install `cascii` to `/usr/local/
 ```
 
 You will be prompted for your password as it uses `sudo` to copy the binary.
+
+Alternatively, install from crates.io (once published):
+
+```bash
+cargo install cascii
+```
+
+### As a Library
+
+Add to your `Cargo.toml`:
+
+```toml
+[dependencies]
+cascii = "0.3"
+```
+
+See [LIBRARY.md](LIBRARY.md) for detailed usage examples.
 
 ## Usage
 

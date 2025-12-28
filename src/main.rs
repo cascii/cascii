@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Context, Result};
-use cascii::{AsciiConverter, AppConfig, ConversionOptions, VideoOptions};
+use cascii::{AppConfig, AsciiConverter, ConversionOptions, VideoOptions};
 use clap::{Parser, Subcommand};
 use dialoguer::{Confirm, FuzzySelect, Input, Select};
 use std::collections::HashMap;
@@ -20,8 +20,8 @@ fn load_config() -> Result<AppConfig> {
 
     for p in &tried {
         if p.exists() {
-            let text = fs::read_to_string(p)
-                .with_context(|| format!("reading config {}", p.display()))?;
+            let text =
+                fs::read_to_string(p).with_context(|| format!("reading config {}", p.display()))?;
             let cfg: AppConfig = serde_json::from_str(&text).context("parsing config json")?;
 
             // Validate that ascii_chars contains only ASCII characters
@@ -221,7 +221,7 @@ fn main() -> Result<()> {
     // Load config and decide preset
     let cfg = load_config()?;
     let converter = AsciiConverter::with_config(cfg.clone())?;
-    
+
     let active_preset_name = if args.small {
         "small"
     } else if args.large {
@@ -232,7 +232,7 @@ fn main() -> Result<()> {
         // interactive default uses the configured default preset
         cfg.default_preset.as_str()
     };
-    
+
     let active = cfg
         .presets
         .get(active_preset_name)
@@ -315,7 +315,7 @@ fn main() -> Result<()> {
         .any(|e| {
             e.file_name()
                 .to_str()
-                .map_or(false, |s| s.starts_with("frame_"))
+                .is_some_and(|s| s.starts_with("frame_"))
         });
 
     if has_frames {
@@ -356,7 +356,14 @@ fn main() -> Result<()> {
     if input_path.is_file() {
         if is_image_input {
             println!("Converting image to ASCII...");
-            converter.convert_image(&input_path, &output_path.join(format!("{}.txt", input_path.file_stem().unwrap().to_str().unwrap())), &conv_opts)?;
+            converter.convert_image(
+                input_path,
+                &output_path.join(format!(
+                    "{}.txt",
+                    input_path.file_stem().unwrap().to_str().unwrap()
+                )),
+                &conv_opts,
+            )?;
         } else {
             println!("Extracting and converting video frames...");
             let video_opts = VideoOptions {
@@ -365,11 +372,17 @@ fn main() -> Result<()> {
                 end: args.end.clone(),
                 columns,
             };
-            converter.convert_video(&input_path, &output_path, &video_opts, &conv_opts, args.keep_images)?;
+            converter.convert_video(
+                input_path,
+                &output_path,
+                &video_opts,
+                &conv_opts,
+                args.keep_images,
+            )?;
         }
     } else if input_path.is_dir() {
         println!("Converting directory of images...");
-        converter.convert_directory(&input_path, &output_path, &conv_opts, args.keep_images)?;
+        converter.convert_directory(input_path, &output_path, &conv_opts, args.keep_images)?;
     } else {
         return Err(anyhow!("Input path does not exist"));
     }
@@ -382,7 +395,7 @@ fn main() -> Result<()> {
         .max_depth(1)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "txt"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "txt"))
         .count();
 
     let mut details = format!(
@@ -416,7 +429,7 @@ fn find_media_files() -> Result<Vec<String>> {
         .filter_map(|e| e.ok())
         .filter(|e| {
             e.path().is_file()
-                && e.path().extension().map_or(false, |ext| {
+                && e.path().extension().is_some_and(|ext| {
                     matches!(
                         ext.to_str(),
                         Some("mp4" | "mkv" | "mov" | "avi" | "webm" | "png" | "jpg")
@@ -505,8 +518,8 @@ fn trim_file(
     trim_top: usize,
     trim_bottom: usize,
 ) -> Result<()> {
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let content =
+        fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
 
     if lines.is_empty() {
@@ -549,8 +562,7 @@ fn trim_file(
     let end_row_exclusive = height - trim_bottom;
     let mut trimmed: Vec<String> = Vec::with_capacity(end_row_exclusive - start_row);
 
-    for y in start_row..end_row_exclusive {
-        let line = &lines[y];
+    for line in lines.iter().take(end_row_exclusive).skip(start_row) {
         // Apply horizontal trims using char indices (to handle unicode safely)
         let left = trim_left;
         let right = trim_right;
@@ -592,15 +604,11 @@ fn run_find_loop(dir: &Path) -> Result<()> {
             .trim_end_matches(".txt")
             .parse::<usize>()
             .unwrap_or(frames.len());
-        let content = fs::read_to_string(&p)
-            .with_context(|| format!("reading {}", p.display()))?;
+        let content = fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))?;
         frames.push((num, content));
     }
     if frames.is_empty() {
-        return Err(anyhow!(
-            "No frame_*.txt files found in {}",
-            dir.display()
-        ));
+        return Err(anyhow!("No frame_*.txt files found in {}", dir.display()));
     }
     frames.sort_by_key(|(n, _)| *n);
 
@@ -727,10 +735,10 @@ fn export_loop(
     ));
     fs::create_dir_all(&out)?;
     let mut counter: usize = 1;
-    for i in start_idx..=end_idx {
+    for frame in frames.iter().take(end_idx + 1).skip(start_idx) {
         // inclusive both ends as per example ABCD A
         let filename = out.join(format!("frame_{:04}.txt", counter));
-        fs::write(filename, &frames[i].1)?;
+        fs::write(filename, &frame.1)?;
         counter += 1;
     }
     Ok(())
@@ -748,8 +756,8 @@ fn repeat_loop(
     for (_, content) in frames.iter().take(end_idx + 1) {
         new_seq.push(content.clone());
     }
-    for i in start_idx..=end_idx {
-        new_seq.push(frames[i].1.clone());
+    for frame in frames.iter().take(end_idx + 1).skip(start_idx) {
+        new_seq.push(frame.1.clone());
     }
     for (_, content) in frames.iter().skip(end_idx + 1) {
         new_seq.push(content.clone());
