@@ -22,7 +22,7 @@ struct Preset {
 }
 
 fn default_ascii_chars() -> String {
-    " .`'^,:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$".to_string()
+    " .'`^,:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$".to_string()
 }
 
 fn default_start_str() -> String { "0".to_string() }
@@ -63,7 +63,7 @@ fn load_config() -> Result<AppConfig> {
             "large":   {"columns": 800, "fps": 60, "font_ratio": 0.7, "luminance": 1}
         },
         "default_preset": "default",
-        "ascii_chars": " .`'^,:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$",
+        "ascii_chars": " .'`^,:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$",
         "default_start": "0",
         "default_end": ""
     }"#;
@@ -420,8 +420,8 @@ fn main() -> Result<()> {
         .count();
 
     let mut details = format!(
-        "Frames: {}\nLuminance: {}\nFont Ratio: {}\nColumns: {}",
-        frame_count, luminance, font_ratio, columns
+        "Version: {}\nFrames: {}\nLuminance: {}\nFont Ratio: {}\nColumns: {}",
+        env!("CARGO_PKG_VERSION"), frame_count, luminance, font_ratio, columns
     );
 
     if input_path.is_file() && !is_image_input {
@@ -469,8 +469,8 @@ fn process_single_image(
     println!("\nASCII generation complete in {}", output_path.display());
 
     let details = format!(
-        "Luminance: {}\nFont Ratio: {}\nColumns: {}",
-        luminance, font_ratio, columns
+        "Version: {}\nLuminance: {}\nFont Ratio: {}\nColumns: {}",
+        env!("CARGO_PKG_VERSION"), luminance, font_ratio, columns
     );
     let details_path = output_path.join("details.md");
     fs::write(details_path, &details).context("writing details file")?;
@@ -620,22 +620,25 @@ fn convert_image_to_ascii(
         .with_context(|| format!("opening {}", img_path.display()))?
         .to_rgb8();
 
-    if let Some(new_w) = columns {
-        let (w, h) = img.dimensions();
-        if new_w != w {
-            let new_h = (h as f32 * (new_w as f32 / w as f32)).round() as u32;
-            img = image::imageops::resize(&img, new_w, new_h, image::imageops::FilterType::Triangle);
-        }
+    let (orig_w, orig_h) = img.dimensions();
+    let (target_w, target_h) = if let Some(cols) = columns {
+        let w = cols;
+        let h = (orig_h as f32 / orig_w as f32 * cols as f32 * font_ratio).round() as u32;
+        (w, h.max(1))
+    } else {
+        let w = orig_w;
+        let h = (orig_h as f32 * font_ratio).round() as u32;
+        (w, h.max(1))
+    };
+
+    if target_w != orig_w || target_h != orig_h {
+        let dyn_img = image::DynamicImage::ImageRgb8(img);
+        img = dyn_img.resize_exact(target_w, target_h, image::imageops::FilterType::Triangle).to_rgb8();
     }
 
     let (w, h) = img.dimensions();
-    let new_h = ((h as f32) * font_ratio).max(1.0).round() as u32;
-    if new_h != h {
-        img = image::imageops::resize(&img, w, new_h, image::imageops::FilterType::Triangle);
-    }
-
-    let mut out = String::with_capacity((w as usize + 1) * (new_h as usize));
-    for y in 0..new_h {
+    let mut out = String::with_capacity((w as usize + 1) * (h as usize));
+    for y in 0..h {
         for x in 0..w {
             let px = img.get_pixel(x, y);
             let l = luminance(*px);
@@ -651,7 +654,7 @@ fn luminance(rgb: image::Rgb<u8>) -> u8 {
     let r = rgb[0] as f32;
     let g = rgb[1] as f32;
     let b = rgb[2] as f32;
-    (0.2126 * r + 0.7152 * g + 0.0722 * b).round() as u8
+    (0.2126 * r + 0.7152 * g + 0.0722 * b) as u8
 }
 
 fn char_for(luma: u8, threshold: u8, ascii_chars: &[u8]) -> char {
