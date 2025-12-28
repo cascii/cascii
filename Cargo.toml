@@ -2,6 +2,28 @@
 name = "cascii"
 version = "0.2.0"
 edition = "2021"
+authors = ["cascii contributors"]
+description = "High-performance ASCII art generator for images and videos"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/cascii/cascii"
+documentation = "https://docs.rs/cascii"
+homepage = "https://github.com/cascii/cascii"
+readme = "README.md"
+keywords = ["ascii", "art", "video", "image", "converter"]
+categories = ["multimedia::video", "multimedia::images", "command-line-utilities"]
+exclude = [
+    "target/",
+    ".git/",
+    ".github/",
+    "tests/",
+    "resources/*.png",
+    "resources/*.gif",
+    "example_*.txt",
+]
+
+[lib]
+name = "cascii"
+path = "src/lib.rs"
 
 [[bin]]
 name = "cascii"
