@@ -3,7 +3,10 @@ name: Auto Release on Commit
 on:
   push:
     branches:
-      - master
+      - '**'  # Trigger on all branches
+
+permissions:
+  contents: write
 
 jobs:
   check-and-release:
