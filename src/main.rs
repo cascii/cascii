@@ -633,7 +633,7 @@ fn convert_image_to_ascii(
 
     if target_w != orig_w || target_h != orig_h {
         let dyn_img = image::DynamicImage::ImageRgb8(img);
-        img = dyn_img.resize_exact(target_w, target_h, image::imageops::FilterType::Triangle).to_rgb8();
+        img = dyn_img.resize_exact(target_w, target_h, image::imageops::FilterType::Lanczos3).to_rgb8();
     }
 
     let (w, h) = img.dimensions();
@@ -651,9 +651,9 @@ fn convert_image_to_ascii(
 }
 
 fn luminance(rgb: image::Rgb<u8>) -> u8 {
-    let r = rgb[0] as f32;
-    let g = rgb[1] as f32;
-    let b = rgb[2] as f32;
+    let r = rgb[0] as f64;
+    let g = rgb[1] as f64;
+    let b = rgb[2] as f64;
     (0.2126 * r + 0.7152 * g + 0.0722 * b) as u8
 }
 
@@ -661,12 +661,15 @@ fn char_for(luma: u8, threshold: u8, ascii_chars: &[u8]) -> char {
     if luma < threshold {
         return ' ';
     }
-    let chars = ascii_chars;
-    let idx = (((luma.saturating_sub(threshold)) as f32 / (255u16.saturating_sub(threshold as u16) as f32))
-        * ((chars.len() - 1) as f32))
-        .clamp(0.0, (chars.len() - 1) as f32)
-        as usize;
-    chars[idx] as char
+    
+    let effective_luma = (luma as u32).saturating_sub(threshold as u32);
+    let range = (255u32).saturating_sub(threshold as u32).max(1);
+    let num_chars_minus_1 = (ascii_chars.len() as u32).saturating_sub(1);
+    
+    let idx = (effective_luma * num_chars_minus_1) / range;
+    let idx = idx.min(num_chars_minus_1) as usize;
+    
+    ascii_chars[idx] as char
 }
 
 fn run_uninstall(is_interactive: bool) -> Result<()> {
