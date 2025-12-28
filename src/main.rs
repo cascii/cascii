@@ -51,6 +51,16 @@ fn load_config() -> Result<AppConfig> {
         if p.exists() {
             let text = fs::read_to_string(p).with_context(|| format!("reading config {}", p.display()))?;
             let cfg: AppConfig = serde_json::from_str(&text).context("parsing config json")?;
+            
+            // Validate that ascii_chars contains only ASCII characters
+            if !cfg.ascii_chars.is_ascii() {
+                return Err(anyhow!(
+                    "Config file {} contains non-ASCII characters in ascii_chars field. \
+                    This will cause corrupted output. Please use only ASCII characters.",
+                    p.display()
+                ));
+            }
+            
             return Ok(cfg);
         }
     }

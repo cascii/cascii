@@ -24,13 +24,20 @@ sudo cp "$SOURCE_PATH" "$INSTALL_DIR/$BINARY_NAME"
 echo "Creating backward-compatible 'casci' symlink..."
 sudo ln -sf "$INSTALL_DIR/$BINARY_NAME" "$INSTALL_DIR/casci"
 
-# Install default config if not present
+# Install/update default config
 CONFIG_DIR="$APP_SUPPORT_DIR"
 CONFIG_PATH="$CONFIG_DIR/cascii.json"
-if [ ! -f "$CONFIG_PATH" ]; then
-    echo "Installing default config to $CONFIG_PATH..."
-    mkdir -p "$CONFIG_DIR"
+echo "Installing default config to $CONFIG_PATH..."
+mkdir -p "$CONFIG_DIR"
+
+# Validate that the config file contains only ASCII characters
+if ! LC_ALL=C grep -q '[^[:print:][:space:]]' "$REPO_DIR/resources/cascii.json"; then
     cp "$REPO_DIR/resources/cascii.json" "$CONFIG_PATH"
+    echo "Config file validated and installed."
+else
+    echo "ERROR: Config file contains non-ASCII characters!"
+    echo "This can cause corrupted output. Please check resources/cascii.json"
+    exit 1
 fi
 
 # Determine shell configuration file
