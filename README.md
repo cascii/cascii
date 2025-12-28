@@ -2,6 +2,8 @@
 
 `cascii` is a high-performance, interactive tool for converting videos and image sequences into ASCII art frames.
 
+**New:** `cascii` can now be used as both a CLI tool and a Rust library! See [LIBRARY.md](LIBRARY.md) for library usage documentation.
+
 When converting a video, the output files will be placed in a directory named after the video file. For example, `cascii my_video.mp4` will create a `my_video` directory.
 
 I recommend installing [cascii-viewer](https://github.com/cascii/cascii-viewer) to easily play any ascii animation generated

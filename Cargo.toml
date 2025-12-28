@@ -1,7 +1,16 @@
 [package]
 name = "cascii"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
+description = "High-performance ASCII art generator for images and videos"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/cascii/cascii"
+keywords = ["ascii", "art", "video", "image", "converter"]
+categories = ["multimedia::video", "multimedia::images", "command-line-utilities"]
+
+[lib]
+name = "cascii"
+path = "src/lib.rs"
 
 [[bin]]
 name = "cascii"
