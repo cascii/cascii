@@ -188,10 +188,7 @@ impl AsciiConverter {
     pub fn with_config(config: AppConfig) -> Result<Self> {
         // Validate ASCII characters
         if !config.ascii_chars.is_ascii() {
-            return Err(anyhow!(
-                "Config contains non-ASCII characters in ascii_chars field. \
-                This will cause corrupted output. Please use only ASCII characters."
-            ));
+            return Err(anyhow!("Config contains non-ASCII characters in ascii_chars field. This will cause corrupted output. Please use only ASCII characters."));
         }
         Ok(Self { config })
     }
@@ -243,21 +240,9 @@ impl AsciiConverter {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn convert_image(
-        &self,
-        input: &Path,
-        output: &Path,
-        options: &ConversionOptions,
-    ) -> Result<()> {
+    pub fn convert_image(&self, input: &Path, output: &Path, options: &ConversionOptions) -> Result<()> {
         let ascii_chars = options.ascii_chars.as_bytes();
-        convert_image_to_ascii(
-            input,
-            output,
-            options.font_ratio,
-            options.luminance,
-            options.columns,
-            ascii_chars,
-        )
+        convert_image_to_ascii(input, output,options.font_ratio, options.luminance, options.columns, ascii_chars)
     }
 
     /// Convert image to ASCII string (without writing to file)
@@ -278,13 +263,7 @@ impl AsciiConverter {
     /// ```
     pub fn image_to_string(&self, input: &Path, options: &ConversionOptions) -> Result<String> {
         let ascii_chars = options.ascii_chars.as_bytes();
-        image_to_ascii_string(
-            input,
-            options.font_ratio,
-            options.luminance,
-            options.columns,
-            ascii_chars,
-        )
+        image_to_ascii_string(input, options.font_ratio, options.luminance, options.columns, ascii_chars)
     }
 
     /// Extract frames from video and convert to ASCII
@@ -317,36 +296,51 @@ impl AsciiConverter {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn convert_video(
-        &self,
-        input: &Path,
-        output_dir: &Path,
-        video_opts: &VideoOptions,
-        conv_opts: &ConversionOptions,
-        keep_images: bool,
-    ) -> Result<()> {
+    pub fn convert_video(&self, input: &Path, output_dir: &Path, video_opts: &VideoOptions, conv_opts: &ConversionOptions, keep_images: bool) -> Result<()> {
+        self.convert_video_with_progress(input, output_dir, video_opts, conv_opts, keep_images, None::<fn(usize, usize)>)
+    }
+
+    /// Convert a video to ASCII animation frames with progress callback
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Input video file path
+    /// * `output_dir` - Directory to write ASCII frames
+    /// * `video_opts` - Video extraction options (fps, start, end, columns)
+    /// * `conv_opts` - ASCII conversion options
+    /// * `keep_images` - Whether to keep extracted PNG frames
+    /// * `progress_callback` - Optional callback called with (completed, total) for each frame
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use cascii::{AsciiConverter, ConversionOptions, VideoOptions};
+    /// use std::path::Path;
+    ///
+    /// let converter = AsciiConverter::new();
+    /// let video_opts = VideoOptions { fps: 24, start: None, end: None, columns: 120 };
+    /// let conv_opts = ConversionOptions::default();
+    ///
+    /// converter.convert_video_with_progress(
+    ///     Path::new("video.mp4"),
+    ///     Path::new("output"),
+    ///     &video_opts,
+    ///     &conv_opts,
+    ///     false,
+    ///     Some(|completed, total| {
+    ///         println!("Progress: {}/{} ({:.1}%)", completed, total, (completed as f64 / total as f64) * 100.0);
+    ///     }),
+    /// ).unwrap();
+    /// ```
+    pub fn convert_video_with_progress<F>(&self, input: &Path, output_dir: &Path, video_opts: &VideoOptions, conv_opts: &ConversionOptions, keep_images: bool, progress_callback: Option<F>) -> Result<()> where F: Fn(usize, usize) + Send + Sync {
         fs::create_dir_all(output_dir).context("creating output directory")?;
 
         // Extract frames with ffmpeg
-        extract_video_frames(
-            input,
-            output_dir,
-            video_opts.columns,
-            video_opts.fps,
-            video_opts.start.as_deref(),
-            video_opts.end.as_deref(),
-        )?;
+        extract_video_frames(input, output_dir, video_opts.columns, video_opts.fps, video_opts.start.as_deref(), video_opts.end.as_deref())?;
 
-        // Convert frames to ASCII
+        // Convert frames to ASCII with progress callback
         let ascii_chars = conv_opts.ascii_chars.as_bytes();
-        convert_directory_parallel(
-            output_dir,
-            output_dir,
-            conv_opts.font_ratio,
-            conv_opts.luminance,
-            keep_images,
-            ascii_chars,
-        )?;
+        convert_directory_parallel_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, keep_images, ascii_chars, progress_callback)?;
 
         Ok(())
     }
@@ -359,23 +353,10 @@ impl AsciiConverter {
     /// * `output_dir` - Directory to write ASCII files
     /// * `options` - Conversion options
     /// * `keep_images` - Whether to keep original images
-    pub fn convert_directory(
-        &self,
-        input_dir: &Path,
-        output_dir: &Path,
-        options: &ConversionOptions,
-        keep_images: bool,
-    ) -> Result<()> {
+    pub fn convert_directory(&self, input_dir: &Path, output_dir: &Path, options: &ConversionOptions, keep_images: bool) -> Result<()> {
         fs::create_dir_all(output_dir)?;
         let ascii_chars = options.ascii_chars.as_bytes();
-        convert_directory_parallel(
-            input_dir,
-            output_dir,
-            options.font_ratio,
-            options.luminance,
-            keep_images,
-            ascii_chars,
-        )
+        convert_directory_parallel(input_dir, output_dir, options.font_ratio, options.luminance, keep_images, ascii_chars)
     }
 
     /// Get a preset by name
@@ -402,28 +383,14 @@ impl Default for AsciiConverter {
 }
 
 // Internal implementation functions
-
-fn convert_image_to_ascii(
-    img_path: &Path,
-    out_txt: &Path,
-    font_ratio: f32,
-    threshold: u8,
-    columns: Option<u32>,
-    ascii_chars: &[u8],
-) -> Result<()> {
+fn convert_image_to_ascii(img_path: &Path, out_txt: &Path, font_ratio: f32, threshold: u8, columns: Option<u32>, ascii_chars: &[u8]) -> Result<()> {
     let ascii_string =
         image_to_ascii_string(img_path, font_ratio, threshold, columns, ascii_chars)?;
     fs::write(out_txt, ascii_string).with_context(|| format!("writing {}", out_txt.display()))?;
     Ok(())
 }
 
-fn image_to_ascii_string(
-    img_path: &Path,
-    font_ratio: f32,
-    threshold: u8,
-    columns: Option<u32>,
-    ascii_chars: &[u8],
-) -> Result<String> {
+fn image_to_ascii_string(img_path: &Path, font_ratio: f32, threshold: u8, columns: Option<u32>, ascii_chars: &[u8]) -> Result<String> {
     let mut img = image::open(img_path)
         .with_context(|| format!("opening {}", img_path.display()))?
         .to_rgb8();
@@ -481,14 +448,7 @@ fn char_for(luma: u8, threshold: u8, ascii_chars: &[u8]) -> char {
     ascii_chars[idx] as char
 }
 
-fn extract_video_frames(
-    input: &Path,
-    out_dir: &Path,
-    columns: u32,
-    fps: u32,
-    start: Option<&str>,
-    end: Option<&str>,
-) -> Result<()> {
+fn extract_video_frames(input: &Path, out_dir: &Path, columns: u32, fps: u32, start: Option<&str>, end: Option<&str>) -> Result<()> {
     let out_pattern = out_dir.join("frame_%04d.png");
     let mut ffmpeg_args: Vec<String> = vec!["-loglevel".into(), "error".into()];
 
@@ -546,14 +506,14 @@ fn parse_timestamp(s: &str) -> f64 {
     })
 }
 
-fn convert_directory_parallel(
-    src_dir: &Path,
-    dst_dir: &Path,
-    font_ratio: f32,
-    threshold: u8,
-    keep_images: bool,
-    ascii_chars: &[u8],
-) -> Result<()> {
+fn convert_directory_parallel(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, keep_images: bool, ascii_chars: &[u8]) -> Result<()> {
+    convert_directory_parallel_with_progress(src_dir, dst_dir, font_ratio, threshold, keep_images, ascii_chars, None::<fn(usize, usize)>)
+}
+
+fn convert_directory_parallel_with_progress<F>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, keep_images: bool, ascii_chars: &[u8], progress_callback: Option<F>,) -> Result<()> where F: Fn(usize, usize) + Send + Sync {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
     fs::create_dir_all(dst_dir)?;
     let mut pngs: Vec<PathBuf> = WalkDir::new(src_dir)
         .min_depth(1)
@@ -565,13 +525,24 @@ fn convert_directory_parallel(
         .collect();
     pngs.sort();
 
+    let total = pngs.len();
+    let completed = Arc::new(AtomicUsize::new(0));
+
     pngs.par_iter().try_for_each(|img_path| -> Result<()> {
         let file_stem = img_path
             .file_stem()
             .and_then(|s| s.to_str())
             .ok_or_else(|| anyhow!("bad file name"))?;
         let out_txt = dst_dir.join(format!("{}.txt", file_stem));
-        convert_image_to_ascii(img_path, &out_txt, font_ratio, threshold, None, ascii_chars)
+        convert_image_to_ascii(img_path, &out_txt, font_ratio, threshold, None, ascii_chars)?;
+
+        // Update progress
+        let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
+        if let Some(ref callback) = progress_callback {
+            callback(current, total);
+        }
+
+        Ok(())
     })?;
 
     if !keep_images {
