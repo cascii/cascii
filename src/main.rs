@@ -2,10 +2,12 @@ use anyhow::{anyhow, Context, Result};
 use cascii::{AppConfig, AsciiConverter, ConversionOptions, VideoOptions};
 use clap::{Parser, Subcommand};
 use dialoguer::{Confirm, FuzzySelect, Input, Select};
+use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::HashMap;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use walkdir::WalkDir;
 
 fn load_config() -> Result<AppConfig> {
@@ -365,20 +367,49 @@ fn main() -> Result<()> {
                 &conv_opts,
             )?;
         } else {
-            println!("Extracting and converting video frames...");
+            println!("Extracting video frames...");
             let video_opts = VideoOptions {
                 fps,
                 start: args.start.clone(),
                 end: args.end.clone(),
                 columns,
             };
-            converter.convert_video(
+
+            // Create progress bar (will be initialized once we know total frames)
+            let progress_bar: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
+            let pb_clone = Arc::clone(&progress_bar);
+
+            converter.convert_video_with_progress(
                 input_path,
                 &output_path,
                 &video_opts,
                 &conv_opts,
                 args.keep_images,
+                Some(move |completed: usize, total: usize| {
+                    let mut pb_guard = pb_clone.lock().unwrap();
+                    if pb_guard.is_none() {
+                        // Initialize progress bar on first callback
+                        let pb = ProgressBar::new(total as u64);
+                        pb.set_style(
+                            ProgressStyle::default_bar()
+                                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%)")
+                                .unwrap()
+                                .progress_chars("#>-"),
+                        );
+                        pb.set_message("Converting frames");
+                        *pb_guard = Some(pb);
+                    }
+                    if let Some(ref pb) = *pb_guard {
+                        pb.set_position(completed as u64);
+                    }
+                }),
             )?;
+
+            // Finish the progress bar
+            let pb_opt = progress_bar.lock().unwrap().take();
+            if let Some(pb) = pb_opt {
+                pb.finish_with_message("Done");
+            }
         }
     } else if input_path.is_dir() {
         println!("Converting directory of images...");
