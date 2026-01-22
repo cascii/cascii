@@ -97,6 +97,10 @@ struct Args {
     #[arg(long, default_value_t = false)]
     keep_images: bool,
 
+    /// Extract colors to CSV files alongside ASCII output
+    #[arg(long, default_value_t = false)]
+    colors: bool,
+
     /// Start time for video conversion (e.g., 00:01:23.456 or 83.456)
     #[arg(long)]
     start: Option<String>,
@@ -353,6 +357,7 @@ fn main() -> Result<()> {
         font_ratio,
         luminance,
         ascii_chars: cfg.ascii_chars.clone(),
+        extract_colors: args.colors,
     };
 
     if input_path.is_file() {
