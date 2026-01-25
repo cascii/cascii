@@ -87,6 +87,17 @@ impl Default for AppConfig {
     }
 }
 
+/// Controls what output files are generated
+#[derive(Debug, Clone, PartialEq)]
+pub enum OutputMode {
+    /// Only generate .txt files (plain ASCII)
+    TextOnly,
+    /// Only generate .cframe files (combined text + color binary)
+    ColorOnly,
+    /// Generate both .txt and .cframe files
+    TextAndColor,
+}
+
 /// Options for ASCII conversion
 #[derive(Debug, Clone)]
 pub struct ConversionOptions {
@@ -98,8 +109,8 @@ pub struct ConversionOptions {
     pub luminance: u8,
     /// ASCII character set to use (from darkest to lightest)
     pub ascii_chars: String,
-    /// Whether to extract colors to CSV files
-    pub extract_colors: bool,
+    /// What output files to generate
+    pub output_mode: OutputMode,
 }
 
 impl Default for ConversionOptions {
@@ -109,7 +120,7 @@ impl Default for ConversionOptions {
             font_ratio: 0.7,
             luminance: 20,
             ascii_chars: default_ascii_chars(),
-            extract_colors: false,
+            output_mode: OutputMode::TextOnly,
         }
     }
 }
@@ -139,9 +150,9 @@ impl ConversionOptions {
         self
     }
 
-    /// Create options with color extraction enabled or disabled
-    pub fn with_extract_colors(mut self, extract: bool) -> Self {
-        self.extract_colors = extract;
+    /// Set the output mode
+    pub fn with_output_mode(mut self, mode: OutputMode) -> Self {
+        self.output_mode = mode;
         self
     }
 
@@ -152,7 +163,7 @@ impl ConversionOptions {
             font_ratio: preset.font_ratio,
             luminance: preset.luminance,
             ascii_chars,
-            extract_colors: false,
+            output_mode: OutputMode::TextOnly,
         }
     }
 }
@@ -252,7 +263,7 @@ impl AsciiConverter {
     /// ```
     pub fn convert_image(&self, input: &Path, output: &Path, options: &ConversionOptions) -> Result<()> {
         let ascii_chars = options.ascii_chars.as_bytes();
-        convert_image_to_ascii(input, output, options.font_ratio, options.luminance, options.columns, ascii_chars, options.extract_colors)
+        convert_image_to_ascii(input, output, options.font_ratio, options.luminance, options.columns, ascii_chars, &options.output_mode)
     }
 
     /// Convert image to ASCII string (without writing to file)
@@ -350,7 +361,7 @@ impl AsciiConverter {
 
         // Convert frames to ASCII with progress callback
         let ascii_chars = conv_opts.ascii_chars.as_bytes();
-        convert_directory_parallel_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, keep_images, ascii_chars, conv_opts.extract_colors, progress_callback)?;
+        convert_directory_parallel_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, keep_images, ascii_chars, &conv_opts.output_mode, progress_callback)?;
 
         Ok(())
     }
@@ -366,7 +377,7 @@ impl AsciiConverter {
     pub fn convert_directory(&self, input_dir: &Path, output_dir: &Path, options: &ConversionOptions, keep_images: bool) -> Result<()> {
         fs::create_dir_all(output_dir)?;
         let ascii_chars = options.ascii_chars.as_bytes();
-        convert_directory_parallel(input_dir, output_dir, options.font_ratio, options.luminance, keep_images, ascii_chars, options.extract_colors)
+        convert_directory_parallel(input_dir, output_dir, options.font_ratio, options.luminance, keep_images, ascii_chars, &options.output_mode)
     }
 
     /// Get a preset by name
@@ -393,19 +404,26 @@ impl Default for AsciiConverter {
 }
 
 // Internal implementation functions
-fn convert_image_to_ascii(img_path: &Path, out_txt: &Path, font_ratio: f32, threshold: u8, columns: Option<u32>, ascii_chars: &[u8], extract_colors: bool) -> Result<()> {
-    if extract_colors {
-        let (ascii_string, width, height, rgb_data) =
-            image_to_ascii_with_colors(img_path, font_ratio, threshold, columns, ascii_chars)?;
-        fs::write(out_txt, ascii_string).with_context(|| format!("writing {}", out_txt.display()))?;
-
-        // Write binary colors file with .colors extension
-        let colors_path = out_txt.with_extension("colors");
-        write_colors_binary(width, height, &rgb_data, &colors_path)?;
-    } else {
-        let ascii_string =
-            image_to_ascii_string(img_path, font_ratio, threshold, columns, ascii_chars)?;
-        fs::write(out_txt, ascii_string).with_context(|| format!("writing {}", out_txt.display()))?;
+fn convert_image_to_ascii(img_path: &Path, out_txt: &Path, font_ratio: f32, threshold: u8, columns: Option<u32>, ascii_chars: &[u8], output_mode: &OutputMode) -> Result<()> {
+    match output_mode {
+        OutputMode::TextOnly => {
+            let ascii_string =
+                image_to_ascii_string(img_path, font_ratio, threshold, columns, ascii_chars)?;
+            fs::write(out_txt, ascii_string).with_context(|| format!("writing {}", out_txt.display()))?;
+        }
+        OutputMode::ColorOnly => {
+            let (ascii_string, width, height, rgb_data) =
+                image_to_ascii_with_colors(img_path, font_ratio, threshold, columns, ascii_chars)?;
+            let cframe_path = out_txt.with_extension("cframe");
+            write_cframe_binary(width, height, &ascii_string, &rgb_data, &cframe_path)?;
+        }
+        OutputMode::TextAndColor => {
+            let (ascii_string, width, height, rgb_data) =
+                image_to_ascii_with_colors(img_path, font_ratio, threshold, columns, ascii_chars)?;
+            fs::write(out_txt, &ascii_string).with_context(|| format!("writing {}", out_txt.display()))?;
+            let cframe_path = out_txt.with_extension("cframe");
+            write_cframe_binary(width, height, &ascii_string, &rgb_data, &cframe_path)?;
+        }
     }
     Ok(())
 }
@@ -489,21 +507,24 @@ fn image_to_ascii_with_colors(img_path: &Path, font_ratio: f32, threshold: u8, c
     Ok((out, w, h, rgb_data))
 }
 
-/// Binary color format:
-/// - Header: width (u32 LE) + height (u32 LE) = 8 bytes
-/// - Body: RGB values as raw bytes, row-major (3 bytes per character)
-///
-/// Total size: 8 + (width * height * 3) bytes
-///
-/// To read a specific pixel at (row, col):
-///   offset = 8 + (row * width + col) * 3
-fn write_colors_binary(width: u32, height: u32, rgb_data: &[u8], path: &Path) -> Result<()> {
+/// Combined binary format (.cframe): text + color in one file.
+/// Header (8 bytes): width (u32 LE) + height (u32 LE)
+/// Body (width * height * 4 bytes): for each character position (row-major):
+///   char (u8) + r (u8) + g (u8) + b (u8)
+fn write_cframe_binary(width: u32, height: u32, ascii_content: &str, rgb_data: &[u8], path: &Path) -> Result<()> {
     use std::io::Write;
     let mut file = fs::File::create(path)
-        .with_context(|| format!("creating colors file {}", path.display()))?;
+        .with_context(|| format!("creating cframe file {}", path.display()))?;
     file.write_all(&width.to_le_bytes())?;
     file.write_all(&height.to_le_bytes())?;
-    file.write_all(rgb_data)?;
+
+    let mut char_idx = 0;
+    for ch in ascii_content.chars() {
+        if ch == '\n' { continue; }
+        let rgb_offset = char_idx * 3;
+        file.write_all(&[ch as u8, rgb_data[rgb_offset], rgb_data[rgb_offset + 1], rgb_data[rgb_offset + 2]])?;
+        char_idx += 1;
+    }
     Ok(())
 }
 
@@ -587,12 +608,12 @@ fn parse_timestamp(s: &str) -> f64 {
     })
 }
 
-fn convert_directory_parallel(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, keep_images: bool, ascii_chars: &[u8], extract_colors: bool) -> Result<()> {
-    convert_directory_parallel_with_progress(src_dir, dst_dir, font_ratio, threshold, keep_images, ascii_chars, extract_colors, None::<fn(usize, usize)>)
+fn convert_directory_parallel(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode) -> Result<()> {
+    convert_directory_parallel_with_progress(src_dir, dst_dir, font_ratio, threshold, keep_images, ascii_chars, output_mode, None::<fn(usize, usize)>)
 }
 
 #[allow(clippy::too_many_arguments)]
-fn convert_directory_parallel_with_progress<F>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, keep_images: bool, ascii_chars: &[u8], extract_colors: bool, progress_callback: Option<F>,) -> Result<()> where F: Fn(usize, usize) + Send + Sync {
+fn convert_directory_parallel_with_progress<F>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, progress_callback: Option<F>,) -> Result<()> where F: Fn(usize, usize) + Send + Sync {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -616,7 +637,7 @@ fn convert_directory_parallel_with_progress<F>(src_dir: &Path, dst_dir: &Path, f
             .and_then(|s| s.to_str())
             .ok_or_else(|| anyhow!("bad file name"))?;
         let out_txt = dst_dir.join(format!("{}.txt", file_stem));
-        convert_image_to_ascii(img_path, &out_txt, font_ratio, threshold, None, ascii_chars, extract_colors)?;
+        convert_image_to_ascii(img_path, &out_txt, font_ratio, threshold, None, ascii_chars, output_mode)?;
 
         // Update progress
         let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
