@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Context, Result};
-use cascii::{AppConfig, AsciiConverter, ConversionOptions, VideoOptions};
+use cascii::{AppConfig, AsciiConverter, ConversionOptions, OutputMode, VideoOptions};
 use clap::{Parser, Subcommand};
 use dialoguer::{Confirm, FuzzySelect, Input, Select};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -97,9 +97,13 @@ struct Args {
     #[arg(long, default_value_t = false)]
     keep_images: bool,
 
-    /// Extract colors to CSV files alongside ASCII output
-    #[arg(long, default_value_t = false)]
+    /// Generate both .txt and .cframe (color) files
+    #[arg(long, default_value_t = false, conflicts_with = "color_only")]
     colors: bool,
+
+    /// Generate only .cframe (color) files, no .txt
+    #[arg(long, default_value_t = false, conflicts_with = "colors")]
+    color_only: bool,
 
     /// Start time for video conversion (e.g., 00:01:23.456 or 83.456)
     #[arg(long)]
@@ -343,7 +347,11 @@ fn main() -> Result<()> {
             let entry = entry?;
             let path = entry.path();
             if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
-                if name.starts_with("frame_") && (name.ends_with(".png") || name.ends_with(".txt"))
+                if name.starts_with("frame_")
+                    && (name.ends_with(".png")
+                        || name.ends_with(".txt")
+                        || name.ends_with(".cframe")
+                        || name.ends_with(".colors"))
                 {
                     fs::remove_file(path)?;
                 }
@@ -351,13 +359,22 @@ fn main() -> Result<()> {
         }
     }
 
+    // Determine output mode
+    let output_mode = if args.color_only {
+        OutputMode::ColorOnly
+    } else if args.colors {
+        OutputMode::TextAndColor
+    } else {
+        OutputMode::TextOnly
+    };
+
     // Create conversion options
     let conv_opts = ConversionOptions {
         columns: Some(columns),
         font_ratio,
         luminance,
         ascii_chars: cfg.ascii_chars.clone(),
-        extract_colors: args.colors,
+        output_mode: output_mode.clone(),
     };
 
     if input_path.is_file() {
@@ -426,13 +443,20 @@ fn main() -> Result<()> {
     println!("\nASCII generation complete in {}", output_path.display());
 
     // --- Create details.txt ---
+    let frame_ext = if output_mode == OutputMode::ColorOnly { "cframe" } else { "txt" };
     let frame_count = WalkDir::new(&output_path)
         .min_depth(1)
         .max_depth(1)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().is_some_and(|ext| ext == "txt"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == frame_ext))
         .count();
+
+    let mode_str = match output_mode {
+        OutputMode::TextOnly => "text-only",
+        OutputMode::ColorOnly => "color-only",
+        OutputMode::TextAndColor => "text+color",
+    };
 
     let mut details = format!(
         "Version: {}\nFrames: {}\nLuminance: {}\nFont Ratio: {}\nColumns: {}",
@@ -446,6 +470,8 @@ fn main() -> Result<()> {
     if input_path.is_file() && !is_image_input {
         details.push_str(&format!("\nFPS: {}", fps));
     }
+
+    details.push_str(&format!("\nOutput: {}", mode_str));
 
     let details_path = output_path.join("details.md");
     fs::write(details_path, &details).context("writing details file")?;
