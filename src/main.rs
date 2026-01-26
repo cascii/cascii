@@ -487,51 +487,45 @@ fn main() -> Result<()> {
     } else if input_path.is_dir() {
         println!("Converting directory of images...");
         converter.convert_directory(input_path, &output_path, &conv_opts, args.keep_images)?;
+
+        // For directory conversion, create details.md manually since it doesn't go through video conversion
+        let frame_ext = if output_mode == OutputMode::ColorOnly { "cframe" } else { "txt" };
+        let frame_count = WalkDir::new(&output_path)
+            .min_depth(1)
+            .max_depth(1)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == frame_ext))
+            .count();
+
+        let mode_str = match output_mode {
+            OutputMode::TextOnly => "text-only",
+            OutputMode::ColorOnly => "color-only",
+            OutputMode::TextAndColor => "text+color",
+        };
+
+        let details = format!(
+            "Version: {}\nFrames: {}\nLuminance: {}\nFont Ratio: {}\nColumns: {}\nOutput: {}",
+            env!("CARGO_PKG_VERSION"),
+            frame_count,
+            luminance,
+            font_ratio,
+            columns,
+            mode_str
+        );
+
+        let details_path = output_path.join("details.md");
+        fs::write(&details_path, &details).context("writing details file")?;
+
+        if args.log_details {
+            println!("\n--- Generation Details ---");
+            println!("{}", details);
+        }
     } else {
         return Err(anyhow!("Input path does not exist"));
     }
 
     println!("\nASCII generation complete in {}", output_path.display());
-
-    // --- Create details.txt ---
-    let frame_ext = if output_mode == OutputMode::ColorOnly { "cframe" } else { "txt" };
-    let frame_count = WalkDir::new(&output_path)
-        .min_depth(1)
-        .max_depth(1)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().is_some_and(|ext| ext == frame_ext))
-        .count();
-
-    let mode_str = match output_mode {
-        OutputMode::TextOnly => "text-only",
-        OutputMode::ColorOnly => "color-only",
-        OutputMode::TextAndColor => "text+color",
-    };
-
-    let mut details = format!(
-        "Version: {}\nFrames: {}\nLuminance: {}\nFont Ratio: {}\nColumns: {}",
-        env!("CARGO_PKG_VERSION"),
-        frame_count,
-        luminance,
-        font_ratio,
-        columns
-    );
-
-    if input_path.is_file() && !is_image_input {
-        details.push_str(&format!("\nFPS: {}", fps));
-    }
-
-    details.push_str(&format!("\nOutput: {}", mode_str));
-    details.push_str(&format!("\nAudio: {}", args.audio));
-
-    let details_path = output_path.join("details.md");
-    fs::write(details_path, &details).context("writing details file")?;
-
-    if args.log_details {
-        println!("\n--- Generation Details ---");
-        println!("{}", details);
-    }
 
     Ok(())
 }

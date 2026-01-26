@@ -152,6 +152,76 @@ impl Progress {
     }
 }
 
+/// Result of a conversion operation, containing metadata about the conversion
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversionResult {
+    /// Number of frames generated
+    pub frame_count: usize,
+    /// Target columns (width) used
+    pub columns: u32,
+    /// Font ratio used
+    pub font_ratio: f32,
+    /// Luminance threshold used
+    pub luminance: u8,
+    /// FPS used (for video conversions)
+    pub fps: Option<u32>,
+    /// Output mode used
+    pub output_mode: String,
+    /// Whether audio was extracted
+    pub audio_extracted: bool,
+    /// Path to the output directory
+    pub output_dir: PathBuf,
+}
+
+impl ConversionResult {
+    /// Write the conversion details to a details.md file in the output directory
+    pub fn write_details_file(&self) -> Result<PathBuf> {
+        let details_path = self.output_dir.join("details.md");
+
+        let mut details = format!(
+            "Version: {}\nFrames: {}\nLuminance: {}\nFont Ratio: {}\nColumns: {}",
+            env!("CARGO_PKG_VERSION"),
+            self.frame_count,
+            self.luminance,
+            self.font_ratio,
+            self.columns
+        );
+
+        if let Some(fps) = self.fps {
+            details.push_str(&format!("\nFPS: {}", fps));
+        }
+
+        details.push_str(&format!("\nOutput: {}", self.output_mode));
+        details.push_str(&format!("\nAudio: {}", self.audio_extracted));
+
+        fs::write(&details_path, &details)
+            .with_context(|| format!("writing details file to {}", details_path.display()))?;
+
+        Ok(details_path)
+    }
+
+    /// Get the details as a string (without writing to file)
+    pub fn to_details_string(&self) -> String {
+        let mut details = format!(
+            "Version: {}\nFrames: {}\nLuminance: {}\nFont Ratio: {}\nColumns: {}",
+            env!("CARGO_PKG_VERSION"),
+            self.frame_count,
+            self.luminance,
+            self.font_ratio,
+            self.columns
+        );
+
+        if let Some(fps) = self.fps {
+            details.push_str(&format!("\nFPS: {}", fps));
+        }
+
+        details.push_str(&format!("\nOutput: {}", self.output_mode));
+        details.push_str(&format!("\nAudio: {}", self.audio_extracted));
+
+        details
+    }
+}
+
 /// Configuration preset defining quality settings
 #[derive(Debug, Deserialize, Clone)]
 pub struct Preset {
@@ -435,7 +505,7 @@ impl AsciiConverter {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn convert_video(&self, input: &Path, output_dir: &Path, video_opts: &VideoOptions, conv_opts: &ConversionOptions, keep_images: bool) -> Result<()> {
+    pub fn convert_video(&self, input: &Path, output_dir: &Path, video_opts: &VideoOptions, conv_opts: &ConversionOptions, keep_images: bool) -> Result<ConversionResult> {
         self.convert_video_with_progress(input, output_dir, video_opts, conv_opts, keep_images, None::<fn(usize, usize)>)
     }
 
@@ -471,7 +541,7 @@ impl AsciiConverter {
     ///     }),
     /// ).unwrap();
     /// ```
-    pub fn convert_video_with_progress<F>(&self, input: &Path, output_dir: &Path, video_opts: &VideoOptions, conv_opts: &ConversionOptions, keep_images: bool, progress_callback: Option<F>) -> Result<()> where F: Fn(usize, usize) + Send + Sync {
+    pub fn convert_video_with_progress<F>(&self, input: &Path, output_dir: &Path, video_opts: &VideoOptions, conv_opts: &ConversionOptions, keep_images: bool, progress_callback: Option<F>) -> Result<ConversionResult> where F: Fn(usize, usize) + Send + Sync {
         fs::create_dir_all(output_dir).context("creating output directory")?;
 
         // Extract frames with ffmpeg
@@ -484,9 +554,30 @@ impl AsciiConverter {
 
         // Convert frames to ASCII with progress callback
         let ascii_chars = conv_opts.ascii_chars.as_bytes();
-        convert_directory_parallel_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, keep_images, ascii_chars, &conv_opts.output_mode, progress_callback)?;
+        let total_frames = convert_directory_parallel_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, keep_images, ascii_chars, &conv_opts.output_mode, progress_callback)?;
 
-        Ok(())
+        // Build result with conversion details
+        let output_mode_str = match conv_opts.output_mode {
+            OutputMode::TextOnly => "text-only",
+            OutputMode::ColorOnly => "color-only",
+            OutputMode::TextAndColor => "text+color",
+        };
+
+        let result = ConversionResult {
+            frame_count: total_frames,
+            columns: conv_opts.columns.unwrap_or(video_opts.columns),
+            font_ratio: conv_opts.font_ratio,
+            luminance: conv_opts.luminance,
+            fps: Some(video_opts.fps),
+            output_mode: output_mode_str.to_string(),
+            audio_extracted: video_opts.extract_audio,
+            output_dir: output_dir.to_path_buf(),
+        };
+
+        // Write the details.md file
+        result.write_details_file()?;
+
+        Ok(result)
     }
 
     /// Convert a video to ASCII animation frames with detailed progress reporting
@@ -546,7 +637,7 @@ impl AsciiConverter {
         conv_opts: &ConversionOptions,
         keep_images: bool,
         progress_callback: F,
-    ) -> Result<()>
+    ) -> Result<ConversionResult>
     where
         F: Fn(Progress) + Send + Sync,
     {
@@ -590,7 +681,28 @@ impl AsciiConverter {
         // Phase 4: Complete
         progress_callback(Progress::complete(total_frames));
 
-        Ok(())
+        // Build result with conversion details
+        let output_mode_str = match conv_opts.output_mode {
+            OutputMode::TextOnly => "text-only",
+            OutputMode::ColorOnly => "color-only",
+            OutputMode::TextAndColor => "text+color",
+        };
+
+        let result = ConversionResult {
+            frame_count: total_frames,
+            columns: conv_opts.columns.unwrap_or(video_opts.columns),
+            font_ratio: conv_opts.font_ratio,
+            luminance: conv_opts.luminance,
+            fps: Some(video_opts.fps),
+            output_mode: output_mode_str.to_string(),
+            audio_extracted: video_opts.extract_audio,
+            output_dir: output_dir.to_path_buf(),
+        };
+
+        // Write the details.md file
+        result.write_details_file()?;
+
+        Ok(result)
     }
 
     /// Convert a directory of images to ASCII frames
@@ -601,7 +713,9 @@ impl AsciiConverter {
     /// * `output_dir` - Directory to write ASCII files
     /// * `options` - Conversion options
     /// * `keep_images` - Whether to keep original images
-    pub fn convert_directory(&self, input_dir: &Path, output_dir: &Path, options: &ConversionOptions, keep_images: bool) -> Result<()> {
+    ///
+    /// Returns the number of frames converted.
+    pub fn convert_directory(&self, input_dir: &Path, output_dir: &Path, options: &ConversionOptions, keep_images: bool) -> Result<usize> {
         fs::create_dir_all(output_dir)?;
         let ascii_chars = options.ascii_chars.as_bytes();
         convert_directory_parallel(input_dir, output_dir, options.font_ratio, options.luminance, keep_images, ascii_chars, &options.output_mode)
@@ -945,12 +1059,12 @@ fn parse_timestamp(s: &str) -> f64 {
     })
 }
 
-fn convert_directory_parallel(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode) -> Result<()> {
+fn convert_directory_parallel(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode) -> Result<usize> {
     convert_directory_parallel_with_progress(src_dir, dst_dir, font_ratio, threshold, keep_images, ascii_chars, output_mode, None::<fn(usize, usize)>)
 }
 
 #[allow(clippy::too_many_arguments)]
-fn convert_directory_parallel_with_progress<F>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, progress_callback: Option<F>,) -> Result<()> where F: Fn(usize, usize) + Send + Sync {
+fn convert_directory_parallel_with_progress<F>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, progress_callback: Option<F>,) -> Result<usize> where F: Fn(usize, usize) + Send + Sync {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -991,7 +1105,7 @@ fn convert_directory_parallel_with_progress<F>(src_dir: &Path, dst_dir: &Path, f
         }
     }
 
-    Ok(())
+    Ok(total)
 }
 
 /// Internal function for directory conversion with detailed Progress reporting
