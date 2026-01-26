@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Context, Result};
-use cascii::{AppConfig, AsciiConverter, ConversionOptions, OutputMode, VideoOptions};
+use cascii::{AppConfig, AsciiConverter, ConversionOptions, OutputMode, Progress, ProgressPhase, VideoOptions};
 use clap::{Parser, Subcommand};
 use dialoguer::{Confirm, FuzzySelect, Input, Select};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -104,6 +104,10 @@ struct Args {
     /// Generate only .cframe (color) files, no .txt
     #[arg(long, default_value_t = false, conflicts_with = "colors")]
     color_only: bool,
+
+    /// Extract audio from video to audio.mp3
+    #[arg(long, default_value_t = false)]
+    audio: bool,
 
     /// Start time for video conversion (e.g., 00:01:23.456 or 83.456)
     #[arg(long)]
@@ -389,42 +393,89 @@ fn main() -> Result<()> {
                 &conv_opts,
             )?;
         } else {
-            println!("Extracting video frames...");
             let video_opts = VideoOptions {
                 fps,
                 start: args.start.clone(),
                 end: args.end.clone(),
                 columns,
+                extract_audio: args.audio,
             };
 
-            // Create progress bar (will be initialized once we know total frames)
+            // Create progress bar for multi-phase progress
             let progress_bar: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
+            let spinner: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
             let pb_clone = Arc::clone(&progress_bar);
+            let spinner_clone = Arc::clone(&spinner);
 
-            converter.convert_video_with_progress(
+            converter.convert_video_with_detailed_progress(
                 input_path,
                 &output_path,
                 &video_opts,
                 &conv_opts,
                 args.keep_images,
-                Some(move |completed: usize, total: usize| {
-                    let mut pb_guard = pb_clone.lock().unwrap();
-                    if pb_guard.is_none() {
-                        // Initialize progress bar on first callback
-                        let pb = ProgressBar::new(total as u64);
-                        pb.set_style(
-                            ProgressStyle::default_bar()
-                                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%)")
-                                .unwrap()
-                                .progress_chars("#>-"),
-                        );
-                        pb.set_message("Converting frames");
-                        *pb_guard = Some(pb);
+                move |progress: Progress| {
+                    match progress.phase {
+                        ProgressPhase::ExtractingFrames => {
+                            // Show spinner for indeterminate extraction phase
+                            let mut sp_guard = spinner_clone.lock().unwrap();
+                            if sp_guard.is_none() {
+                                let sp = ProgressBar::new_spinner();
+                                sp.set_style(
+                                    ProgressStyle::default_spinner()
+                                        .template("{spinner:.green} {msg}")
+                                        .unwrap()
+                                );
+                                sp.set_message("Extracting frames from video...");
+                                sp.enable_steady_tick(std::time::Duration::from_millis(100));
+                                *sp_guard = Some(sp);
+                            }
+                        }
+                        ProgressPhase::ExtractingAudio => {
+                            // Finish spinner if running, show audio extraction
+                            let mut sp_guard = spinner_clone.lock().unwrap();
+                            if let Some(sp) = sp_guard.take() {
+                                sp.finish_with_message("Frames extracted");
+                            }
+                            let sp = ProgressBar::new_spinner();
+                            sp.set_style(
+                                ProgressStyle::default_spinner()
+                                    .template("{spinner:.green} {msg}")
+                                    .unwrap()
+                            );
+                            sp.set_message("Extracting audio...");
+                            sp.enable_steady_tick(std::time::Duration::from_millis(100));
+                            *sp_guard = Some(sp);
+                        }
+                        ProgressPhase::ConvertingFrames => {
+                            // Finish spinner, switch to progress bar
+                            let mut sp_guard = spinner_clone.lock().unwrap();
+                            if let Some(sp) = sp_guard.take() {
+                                sp.finish_with_message("Extraction complete");
+                            }
+                            drop(sp_guard);
+
+                            let mut pb_guard = pb_clone.lock().unwrap();
+                            if pb_guard.is_none() && progress.total > 0 {
+                                // Initialize progress bar on first conversion callback
+                                let pb = ProgressBar::new(progress.total as u64);
+                                pb.set_style(
+                                    ProgressStyle::default_bar()
+                                        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%)")
+                                        .unwrap()
+                                        .progress_chars("#>-"),
+                                );
+                                pb.set_message("Converting frames");
+                                *pb_guard = Some(pb);
+                            }
+                            if let Some(ref pb) = *pb_guard {
+                                pb.set_position(progress.completed as u64);
+                            }
+                        }
+                        ProgressPhase::Complete => {
+                            // Progress bar will be finished after the call returns
+                        }
                     }
-                    if let Some(ref pb) = *pb_guard {
-                        pb.set_position(completed as u64);
-                    }
-                }),
+                },
             )?;
 
             // Finish the progress bar
@@ -472,6 +523,7 @@ fn main() -> Result<()> {
     }
 
     details.push_str(&format!("\nOutput: {}", mode_str));
+    details.push_str(&format!("\nAudio: {}", args.audio));
 
     let details_path = output_path.join("details.md");
     fs::write(details_path, &details).context("writing details file")?;
