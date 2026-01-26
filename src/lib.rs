@@ -527,7 +527,7 @@ impl AsciiConverter {
     /// use std::path::Path;
     ///
     /// let converter = AsciiConverter::new();
-    /// let video_opts = VideoOptions { fps: 24, start: None, end: None, columns: 120 };
+    /// let video_opts = VideoOptions { fps: 24, start: None, end: None, columns: 120, extract_audio: false };
     /// let conv_opts = ConversionOptions::default();
     ///
     /// converter.convert_video_with_progress(
