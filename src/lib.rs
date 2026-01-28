@@ -66,8 +66,9 @@ use image::DynamicImage;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::Command as ProcCommand;
+use std::process::{Command as ProcCommand, Stdio};
 use walkdir::WalkDir;
 
 /// Represents the current phase of a conversion operation
@@ -110,6 +111,22 @@ impl Progress {
             total: 0,
             percentage: 0.0,
             message: "Extracting frames from video...".to_string(),
+        }
+    }
+
+    /// Create a progress update for extracting frames with percentage
+    pub fn extracting_frames_progress(current_time_us: u64, total_duration_us: u64) -> Self {
+        let percentage = if total_duration_us > 0 {
+            (current_time_us as f64 / total_duration_us as f64) * 100.0
+        } else {
+            0.0
+        };
+        Self {
+            phase: ProgressPhase::ExtractingFrames,
+            completed: current_time_us as usize,
+            total: total_duration_us as usize,
+            percentage,
+            message: format!("Extracting frames: {:.1}%", percentage),
         }
     }
 
@@ -178,14 +195,7 @@ impl ConversionResult {
     pub fn write_details_file(&self) -> Result<PathBuf> {
         let details_path = self.output_dir.join("details.md");
 
-        let mut details = format!(
-            "Version: {}\nFrames: {}\nLuminance: {}\nFont Ratio: {}\nColumns: {}",
-            env!("CARGO_PKG_VERSION"),
-            self.frame_count,
-            self.luminance,
-            self.font_ratio,
-            self.columns
-        );
+        let mut details = format!("Version: {}\nFrames: {}\nLuminance: {}\nFont Ratio: {}\nColumns: {}", env!("CARGO_PKG_VERSION"), self.frame_count, self.luminance, self.font_ratio, self.columns);
 
         if let Some(fps) = self.fps {
             details.push_str(&format!("\nFPS: {}", fps));
@@ -202,14 +212,7 @@ impl ConversionResult {
 
     /// Get the details as a string (without writing to file)
     pub fn to_details_string(&self) -> String {
-        let mut details = format!(
-            "Version: {}\nFrames: {}\nLuminance: {}\nFont Ratio: {}\nColumns: {}",
-            env!("CARGO_PKG_VERSION"),
-            self.frame_count,
-            self.luminance,
-            self.font_ratio,
-            self.columns
-        );
+        let mut details = format!("Version: {}\nFrames: {}\nLuminance: {}\nFont Ratio: {}\nColumns: {}", env!("CARGO_PKG_VERSION"), self.frame_count, self.luminance, self.font_ratio, self.columns);
 
         if let Some(fps) = self.fps {
             details.push_str(&format!("\nFPS: {}", fps));
@@ -629,54 +632,29 @@ impl AsciiConverter {
     ///     },
     /// ).unwrap();
     /// ```
-    pub fn convert_video_with_detailed_progress<F>(
-        &self,
-        input: &Path,
-        output_dir: &Path,
-        video_opts: &VideoOptions,
-        conv_opts: &ConversionOptions,
-        keep_images: bool,
-        progress_callback: F,
-    ) -> Result<ConversionResult>
-    where
-        F: Fn(Progress) + Send + Sync,
-    {
+    pub fn convert_video_with_detailed_progress<F>(&self, input: &Path, output_dir: &Path, video_opts: &VideoOptions, conv_opts: &ConversionOptions, keep_images: bool, progress_callback: F) -> Result<ConversionResult> where F: Fn(Progress) + Send + Sync {
         fs::create_dir_all(output_dir).context("creating output directory")?;
 
-        // Phase 1: Extract frames from video
-        progress_callback(Progress::extracting_frames());
-        extract_video_frames(
+        // Phase 1: Extract frames from video with progress reporting
+        extract_video_frames_with_progress(
             input,
             output_dir,
             video_opts.columns,
             video_opts.fps,
             video_opts.start.as_deref(),
             video_opts.end.as_deref(),
+            &progress_callback,
         )?;
 
         // Phase 2: Extract audio if requested
         if video_opts.extract_audio {
             progress_callback(Progress::extracting_audio());
-            extract_audio(
-                input,
-                output_dir,
-                video_opts.start.as_deref(),
-                video_opts.end.as_deref(),
-            )?;
+            extract_audio(input, output_dir, video_opts.start.as_deref(), video_opts.end.as_deref())?;
         }
 
         // Phase 3: Convert frames to ASCII with progress
         let ascii_chars = conv_opts.ascii_chars.as_bytes();
-        let total_frames = convert_directory_parallel_with_detailed_progress(
-            output_dir,
-            output_dir,
-            conv_opts.font_ratio,
-            conv_opts.luminance,
-            keep_images,
-            ascii_chars,
-            &conv_opts.output_mode,
-            &progress_callback,
-        )?;
+        let total_frames = convert_directory_parallel_with_detailed_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, keep_images, ascii_chars, &conv_opts.output_mode, &progress_callback)?;
 
         // Phase 4: Complete
         progress_callback(Progress::complete(total_frames));
@@ -751,29 +729,10 @@ impl AsciiConverter {
     ///     },
     /// ).unwrap();
     /// ```
-    pub fn convert_directory_with_progress<F>(
-        &self,
-        input_dir: &Path,
-        output_dir: &Path,
-        options: &ConversionOptions,
-        keep_images: bool,
-        progress_callback: F,
-    ) -> Result<usize>
-    where
-        F: Fn(Progress) + Send + Sync,
-    {
+    pub fn convert_directory_with_progress<F>(&self, input_dir: &Path, output_dir: &Path, options: &ConversionOptions, keep_images: bool, progress_callback: F) -> Result<usize> where F: Fn(Progress) + Send + Sync {
         fs::create_dir_all(output_dir)?;
         let ascii_chars = options.ascii_chars.as_bytes();
-        convert_directory_parallel_with_detailed_progress(
-            input_dir,
-            output_dir,
-            options.font_ratio,
-            options.luminance,
-            keep_images,
-            ascii_chars,
-            &options.output_mode,
-            &progress_callback,
-        )
+        convert_directory_parallel_with_detailed_progress(input_dir, output_dir, options.font_ratio, options.luminance, keep_images, ascii_chars, &options.output_mode, &progress_callback)
     }
 
     /// Get a preset by name
@@ -786,10 +745,7 @@ impl AsciiConverter {
         let preset = self
             .get_preset(preset_name)
             .ok_or_else(|| anyhow!("Preset '{}' not found", preset_name))?;
-        Ok(ConversionOptions::from_preset(
-            preset,
-            self.config.ascii_chars.clone(),
-        ))
+        Ok(ConversionOptions::from_preset(preset, self.config.ascii_chars.clone()))
     }
 }
 
@@ -803,8 +759,7 @@ impl Default for AsciiConverter {
 fn convert_image_to_ascii(img_path: &Path, out_txt: &Path, font_ratio: f32, threshold: u8, columns: Option<u32>, ascii_chars: &[u8], output_mode: &OutputMode) -> Result<()> {
     match output_mode {
         OutputMode::TextOnly => {
-            let ascii_string =
-                image_to_ascii_string(img_path, font_ratio, threshold, columns, ascii_chars)?;
+            let ascii_string = image_to_ascii_string(img_path, font_ratio, threshold, columns, ascii_chars)?;
             fs::write(out_txt, ascii_string).with_context(|| format!("writing {}", out_txt.display()))?;
         }
         OutputMode::ColorOnly => {
@@ -814,8 +769,7 @@ fn convert_image_to_ascii(img_path: &Path, out_txt: &Path, font_ratio: f32, thre
             write_cframe_binary(width, height, &ascii_string, &rgb_data, &cframe_path)?;
         }
         OutputMode::TextAndColor => {
-            let (ascii_string, width, height, rgb_data) =
-                image_to_ascii_with_colors(img_path, font_ratio, threshold, columns, ascii_chars)?;
+            let (ascii_string, width, height, rgb_data) = image_to_ascii_with_colors(img_path, font_ratio, threshold, columns, ascii_chars)?;
             fs::write(out_txt, &ascii_string).with_context(|| format!("writing {}", out_txt.display()))?;
             let cframe_path = out_txt.with_extension("cframe");
             write_cframe_binary(width, height, &ascii_string, &rgb_data, &cframe_path)?;
@@ -909,8 +863,7 @@ fn image_to_ascii_with_colors(img_path: &Path, font_ratio: f32, threshold: u8, c
 ///   char (u8) + r (u8) + g (u8) + b (u8)
 fn write_cframe_binary(width: u32, height: u32, ascii_content: &str, rgb_data: &[u8], path: &Path) -> Result<()> {
     use std::io::Write;
-    let mut file = fs::File::create(path)
-        .with_context(|| format!("creating cframe file {}", path.display()))?;
+    let mut file = fs::File::create(path).with_context(|| format!("creating cframe file {}", path.display()))?;
     file.write_all(&width.to_le_bytes())?;
     file.write_all(&height.to_le_bytes())?;
 
@@ -998,6 +951,139 @@ fn extract_video_frames(input: &Path, out_dir: &Path, columns: u32, fps: u32, st
     Ok(())
 }
 
+/// Get video duration in microseconds using ffprobe
+fn get_video_duration_us(input: &Path) -> Result<u64> {
+    let output = ProcCommand::new("ffprobe")
+        .args([
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            input.to_str().unwrap(),
+        ])
+        .output()
+        .context("running ffprobe")?;
+
+    if !output.status.success() {
+        return Err(anyhow!("ffprobe failed to get duration"));
+    }
+
+    let duration_str = String::from_utf8_lossy(&output.stdout);
+    let duration_secs: f64 = duration_str.trim().parse().unwrap_or(0.0);
+    Ok((duration_secs * 1_000_000.0) as u64)
+}
+
+/// Extract video frames with progress reporting
+fn extract_video_frames_with_progress<F>(input: &Path, out_dir: &Path, columns: u32, fps: u32, start: Option<&str>, end: Option<&str>, progress_callback: F) -> Result<()> where F: Fn(Progress) + Send + Sync {
+    let out_pattern = out_dir.join("frame_%04d.png");
+
+    // Get video duration for progress calculation
+    let total_duration_us = get_video_duration_us(input).unwrap_or(0);
+
+    // Adjust duration if start/end are specified
+    let effective_duration_us = if let (Some(s), Some(e)) = (start, end) {
+        if !s.is_empty() && !e.is_empty() {
+            let start_secs = parse_timestamp(s);
+            let end_secs = parse_timestamp(e);
+            ((end_secs - start_secs) * 1_000_000.0) as u64
+        } else {
+            total_duration_us
+        }
+    } else if let Some(e) = end {
+        if !e.is_empty() {
+            (parse_timestamp(e) * 1_000_000.0) as u64
+        } else {
+            total_duration_us
+        }
+    } else {
+        total_duration_us
+    };
+
+    let mut ffmpeg_args: Vec<String> = vec![
+        "-loglevel".into(), "error".into(),
+        "-progress".into(), "pipe:1".into(),
+        "-nostats".into(),
+    ];
+
+    if let Some(s) = start {
+        if !s.is_empty() && s != "0" {
+            ffmpeg_args.push("-ss".into());
+            ffmpeg_args.push(s.to_string());
+        }
+    }
+
+    ffmpeg_args.push("-i".into());
+    ffmpeg_args.push(input.to_str().unwrap().to_string());
+
+    if let Some(e) = end {
+        if !e.is_empty() {
+            if let Some(s) = start {
+                if !s.is_empty() && s != "0" {
+                    let start_secs = parse_timestamp(s);
+                    let end_secs = parse_timestamp(e);
+                    let duration = end_secs - start_secs;
+                    if duration > 0.0 {
+                        ffmpeg_args.push("-t".into());
+                        ffmpeg_args.push(duration.to_string());
+                    }
+                } else {
+                    ffmpeg_args.push("-t".into());
+                    ffmpeg_args.push(e.to_string());
+                }
+            } else {
+                ffmpeg_args.push("-t".into());
+                ffmpeg_args.push(e.to_string());
+            }
+        }
+    }
+
+    let vf_option = format!("scale={}:-2,fps={}", columns, fps);
+    ffmpeg_args.push("-vf".into());
+    ffmpeg_args.push(vf_option);
+    ffmpeg_args.push(out_pattern.to_str().unwrap().to_string());
+
+    // Send initial progress
+    progress_callback(Progress::extracting_frames());
+
+    let mut child = ProcCommand::new("ffmpeg")
+        .args(&ffmpeg_args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("spawning ffmpeg")?;
+
+    // Read progress from ffmpeg stdout - throttle to only report every 1% change
+    if let Some(stdout) = child.stdout.take() {
+        let reader = BufReader::new(stdout);
+        let mut last_reported_percent: u64 = 0;
+
+        for line in reader.lines().map_while(Result::ok) {
+            // Parse out_time_us from ffmpeg progress output
+            if let Some(time_str) = line.strip_prefix("out_time_us=") {
+                if let Ok(time_us) = time_str.trim().parse::<u64>() {
+                    if effective_duration_us > 0 {
+                        let current_percent = (time_us * 100) / effective_duration_us;
+                        // Only report if percentage changed (throttle to ~100 updates max)
+                        if current_percent > last_reported_percent {
+                            last_reported_percent = current_percent;
+                            progress_callback(Progress::extracting_frames_progress(
+                                time_us,
+                                effective_duration_us,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let status = child.wait().context("waiting for ffmpeg")?;
+    if !status.success() {
+        return Err(anyhow!("ffmpeg failed"));
+    }
+
+    Ok(())
+}
+
 fn extract_audio(input: &Path, out_dir: &Path, start: Option<&str>, end: Option<&str>) -> Result<()> {
     let out_audio = out_dir.join("audio.mp3");
     let mut ffmpeg_args: Vec<String> = vec!["-loglevel".into(), "error".into(), "-y".into()];
@@ -1064,7 +1150,7 @@ fn convert_directory_parallel(src_dir: &Path, dst_dir: &Path, font_ratio: f32, t
 }
 
 #[allow(clippy::too_many_arguments)]
-fn convert_directory_parallel_with_progress<F>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, progress_callback: Option<F>,) -> Result<usize> where F: Fn(usize, usize) + Send + Sync {
+fn convert_directory_parallel_with_progress<F>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, progress_callback: Option<F>) -> Result<usize> where F: Fn(usize, usize) + Send + Sync {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -1110,19 +1196,7 @@ fn convert_directory_parallel_with_progress<F>(src_dir: &Path, dst_dir: &Path, f
 
 /// Internal function for directory conversion with detailed Progress reporting
 #[allow(clippy::too_many_arguments)]
-fn convert_directory_parallel_with_detailed_progress<F>(
-    src_dir: &Path,
-    dst_dir: &Path,
-    font_ratio: f32,
-    threshold: u8,
-    keep_images: bool,
-    ascii_chars: &[u8],
-    output_mode: &OutputMode,
-    progress_callback: &F,
-) -> Result<usize>
-where
-    F: Fn(Progress) + Send + Sync,
-{
+fn convert_directory_parallel_with_detailed_progress<F>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, progress_callback: &F) -> Result<usize> where F: Fn(Progress) + Send + Sync {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -1139,6 +1213,7 @@ where
 
     let total = pngs.len();
     let completed = Arc::new(AtomicUsize::new(0));
+    let last_reported_percent = Arc::new(AtomicUsize::new(0));
 
     // Report initial progress
     progress_callback(Progress::converting_frames(0, total));
@@ -1151,9 +1226,16 @@ where
         let out_txt = dst_dir.join(format!("{}.txt", file_stem));
         convert_image_to_ascii(img_path, &out_txt, font_ratio, threshold, None, ascii_chars, output_mode)?;
 
-        // Update progress with detailed Progress struct
+        // Update progress - throttle to only report every 1% change
         let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
-        progress_callback(Progress::converting_frames(current, total));
+        let current_percent = if total > 0 { (current * 100) / total } else { 0 };
+        let last_percent = last_reported_percent.load(Ordering::SeqCst);
+
+        // Only report if percentage changed (throttle to ~100 updates max)
+        if current_percent > last_percent || current == total {
+            last_reported_percent.store(current_percent, Ordering::SeqCst);
+            progress_callback(Progress::converting_frames(current, total));
+        }
 
         Ok(())
     })?;
