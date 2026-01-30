@@ -65,11 +65,59 @@ use anyhow::{anyhow, Context, Result};
 use image::DynamicImage;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::ffi::OsStr;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcCommand, Stdio};
 use walkdir::WalkDir;
+
+/// Configuration for ffmpeg/ffprobe binary paths
+///
+/// Use this to specify custom paths for ffmpeg and ffprobe binaries,
+/// for example when bundling them with your application.
+#[derive(Debug, Clone, Default)]
+pub struct FfmpegConfig {
+    /// Custom path to ffmpeg binary. If None, uses system PATH.
+    pub ffmpeg_path: Option<PathBuf>,
+    /// Custom path to ffprobe binary. If None, uses system PATH.
+    pub ffprobe_path: Option<PathBuf>,
+}
+
+impl FfmpegConfig {
+    /// Create a new FfmpegConfig with default settings (use system PATH)
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a config with custom ffmpeg path
+    pub fn with_ffmpeg<P: Into<PathBuf>>(mut self, path: P) -> Self {
+        self.ffmpeg_path = Some(path.into());
+        self
+    }
+
+    /// Create a config with custom ffprobe path
+    pub fn with_ffprobe<P: Into<PathBuf>>(mut self, path: P) -> Self {
+        self.ffprobe_path = Some(path.into());
+        self
+    }
+
+    /// Get the ffmpeg command name or path
+    fn ffmpeg_cmd(&self) -> &OsStr {
+        self.ffmpeg_path
+            .as_ref()
+            .map(|p| p.as_os_str())
+            .unwrap_or_else(|| OsStr::new("ffmpeg"))
+    }
+
+    /// Get the ffprobe command name or path
+    fn ffprobe_cmd(&self) -> &OsStr {
+        self.ffprobe_path
+            .as_ref()
+            .map(|p| p.as_os_str())
+            .unwrap_or_else(|| OsStr::new("ffprobe"))
+    }
+}
 
 /// Represents the current phase of a conversion operation
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -386,6 +434,7 @@ impl Default for VideoOptions {
 /// Main converter struct for ASCII art generation
 pub struct AsciiConverter {
     config: AppConfig,
+    ffmpeg_config: FfmpegConfig,
 }
 
 impl AsciiConverter {
@@ -393,6 +442,7 @@ impl AsciiConverter {
     pub fn new() -> Self {
         Self {
             config: AppConfig::default(),
+            ffmpeg_config: FfmpegConfig::default(),
         }
     }
 
@@ -402,7 +452,23 @@ impl AsciiConverter {
         if !config.ascii_chars.is_ascii() {
             return Err(anyhow!("Config contains non-ASCII characters in ascii_chars field. This will cause corrupted output. Please use only ASCII characters."));
         }
-        Ok(Self { config })
+        Ok(Self { config, ffmpeg_config: FfmpegConfig::default() })
+    }
+
+    /// Set custom ffmpeg/ffprobe paths for this converter
+    ///
+    /// Use this when bundling ffmpeg with your application:
+    /// ```no_run
+    /// use cascii::{AsciiConverter, FfmpegConfig};
+    ///
+    /// let converter = AsciiConverter::new()
+    ///     .with_ffmpeg_config(FfmpegConfig::new()
+    ///         .with_ffmpeg("/path/to/ffmpeg")
+    ///         .with_ffprobe("/path/to/ffprobe"));
+    /// ```
+    pub fn with_ffmpeg_config(mut self, ffmpeg_config: FfmpegConfig) -> Self {
+        self.ffmpeg_config = ffmpeg_config;
+        self
     }
 
     /// Load configuration from a file
@@ -419,12 +485,17 @@ impl AsciiConverter {
             ));
         }
 
-        Ok(Self { config })
+        Ok(Self { config, ffmpeg_config: FfmpegConfig::default() })
     }
 
     /// Get the current configuration
     pub fn config(&self) -> &AppConfig {
         &self.config
+    }
+
+    /// Get the current ffmpeg configuration
+    pub fn ffmpeg_config(&self) -> &FfmpegConfig {
+        &self.ffmpeg_config
     }
 
     /// Convert a single image to ASCII art
@@ -548,11 +619,11 @@ impl AsciiConverter {
         fs::create_dir_all(output_dir).context("creating output directory")?;
 
         // Extract frames with ffmpeg
-        extract_video_frames(input, output_dir, video_opts.columns, video_opts.fps, video_opts.start.as_deref(), video_opts.end.as_deref())?;
+        extract_video_frames(input, output_dir, video_opts.columns, video_opts.fps, video_opts.start.as_deref(), video_opts.end.as_deref(), &self.ffmpeg_config)?;
 
         // Extract audio if requested
         if video_opts.extract_audio {
-            extract_audio(input, output_dir, video_opts.start.as_deref(), video_opts.end.as_deref())?;
+            extract_audio(input, output_dir, video_opts.start.as_deref(), video_opts.end.as_deref(), &self.ffmpeg_config)?;
         }
 
         // Convert frames to ASCII with progress callback
@@ -643,13 +714,14 @@ impl AsciiConverter {
             video_opts.fps,
             video_opts.start.as_deref(),
             video_opts.end.as_deref(),
+            &self.ffmpeg_config,
             &progress_callback,
         )?;
 
         // Phase 2: Extract audio if requested
         if video_opts.extract_audio {
             progress_callback(Progress::extracting_audio());
-            extract_audio(input, output_dir, video_opts.start.as_deref(), video_opts.end.as_deref())?;
+            extract_audio(input, output_dir, video_opts.start.as_deref(), video_opts.end.as_deref(), &self.ffmpeg_config)?;
         }
 
         // Phase 3: Convert frames to ASCII with progress
@@ -899,7 +971,7 @@ fn char_for(luma: u8, threshold: u8, ascii_chars: &[u8]) -> char {
     ascii_chars[idx] as char
 }
 
-fn extract_video_frames(input: &Path, out_dir: &Path, columns: u32, fps: u32, start: Option<&str>, end: Option<&str>) -> Result<()> {
+fn extract_video_frames(input: &Path, out_dir: &Path, columns: u32, fps: u32, start: Option<&str>, end: Option<&str>, ffmpeg_config: &FfmpegConfig) -> Result<()> {
     let out_pattern = out_dir.join("frame_%04d.png");
     let mut ffmpeg_args: Vec<String> = vec!["-loglevel".into(), "error".into()];
 
@@ -940,7 +1012,7 @@ fn extract_video_frames(input: &Path, out_dir: &Path, columns: u32, fps: u32, st
     ffmpeg_args.push(vf_option);
     ffmpeg_args.push(out_pattern.to_str().unwrap().to_string());
 
-    let status = ProcCommand::new("ffmpeg")
+    let status = ProcCommand::new(ffmpeg_config.ffmpeg_cmd())
         .args(&ffmpeg_args)
         .status()
         .context("running ffmpeg")?;
@@ -952,8 +1024,8 @@ fn extract_video_frames(input: &Path, out_dir: &Path, columns: u32, fps: u32, st
 }
 
 /// Get video duration in microseconds using ffprobe
-fn get_video_duration_us(input: &Path) -> Result<u64> {
-    let output = ProcCommand::new("ffprobe")
+fn get_video_duration_us(input: &Path, ffmpeg_config: &FfmpegConfig) -> Result<u64> {
+    let output = ProcCommand::new(ffmpeg_config.ffprobe_cmd())
         .args([
             "-v", "error",
             "-show_entries", "format=duration",
@@ -973,11 +1045,11 @@ fn get_video_duration_us(input: &Path) -> Result<u64> {
 }
 
 /// Extract video frames with progress reporting
-fn extract_video_frames_with_progress<F>(input: &Path, out_dir: &Path, columns: u32, fps: u32, start: Option<&str>, end: Option<&str>, progress_callback: F) -> Result<()> where F: Fn(Progress) + Send + Sync {
+fn extract_video_frames_with_progress<F>(input: &Path, out_dir: &Path, columns: u32, fps: u32, start: Option<&str>, end: Option<&str>, ffmpeg_config: &FfmpegConfig, progress_callback: F) -> Result<()> where F: Fn(Progress) + Send + Sync {
     let out_pattern = out_dir.join("frame_%04d.png");
 
     // Get video duration for progress calculation
-    let total_duration_us = get_video_duration_us(input).unwrap_or(0);
+    let total_duration_us = get_video_duration_us(input, ffmpeg_config).unwrap_or(0);
 
     // Adjust duration if start/end are specified
     let effective_duration_us = if let (Some(s), Some(e)) = (start, end) {
@@ -1044,7 +1116,7 @@ fn extract_video_frames_with_progress<F>(input: &Path, out_dir: &Path, columns: 
     // Send initial progress
     progress_callback(Progress::extracting_frames());
 
-    let mut child = ProcCommand::new("ffmpeg")
+    let mut child = ProcCommand::new(ffmpeg_config.ffmpeg_cmd())
         .args(&ffmpeg_args)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -1084,7 +1156,7 @@ fn extract_video_frames_with_progress<F>(input: &Path, out_dir: &Path, columns: 
     Ok(())
 }
 
-fn extract_audio(input: &Path, out_dir: &Path, start: Option<&str>, end: Option<&str>) -> Result<()> {
+fn extract_audio(input: &Path, out_dir: &Path, start: Option<&str>, end: Option<&str>, ffmpeg_config: &FfmpegConfig) -> Result<()> {
     let out_audio = out_dir.join("audio.mp3");
     let mut ffmpeg_args: Vec<String> = vec!["-loglevel".into(), "error".into(), "-y".into()];
 
@@ -1128,7 +1200,7 @@ fn extract_audio(input: &Path, out_dir: &Path, start: Option<&str>, end: Option<
     ffmpeg_args.push("2".into());
     ffmpeg_args.push(out_audio.to_str().unwrap().to_string());
 
-    let status = ProcCommand::new("ffmpeg")
+    let status = ProcCommand::new(ffmpeg_config.ffmpeg_cmd())
         .args(&ffmpeg_args)
         .status()
         .context("running ffmpeg for audio extraction")?;

@@ -48,8 +48,6 @@ cascii = "0.1"
 
 ## CLI Usage
 
-## CLI Usage
-
 ### cascii
 
 #### Interactive

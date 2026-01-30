@@ -1,6 +1,6 @@
 [package]
 name = "cascii"
-version = "0.12.0"
+version = "0.13.0"
 edition = "2021"
 authors = ["cascii contributors"]
 description = "High-performance ASCII art generator for images and videos"
