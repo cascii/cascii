@@ -67,7 +67,6 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 use std::fs;
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcCommand, Stdio};
 use walkdir::WalkDir;
@@ -707,16 +706,7 @@ impl AsciiConverter {
         fs::create_dir_all(output_dir).context("creating output directory")?;
 
         // Phase 1: Extract frames from video with progress reporting
-        extract_video_frames_with_progress(
-            input,
-            output_dir,
-            video_opts.columns,
-            video_opts.fps,
-            video_opts.start.as_deref(),
-            video_opts.end.as_deref(),
-            &self.ffmpeg_config,
-            &progress_callback,
-        )?;
+        extract_video_frames_with_progress(input, output_dir, video_opts, &self.ffmpeg_config, &progress_callback)?;
 
         // Phase 2: Extract audio if requested
         if video_opts.extract_audio {
@@ -1045,36 +1035,18 @@ fn get_video_duration_us(input: &Path, ffmpeg_config: &FfmpegConfig) -> Result<u
 }
 
 /// Extract video frames with progress reporting
-fn extract_video_frames_with_progress<F>(input: &Path, out_dir: &Path, columns: u32, fps: u32, start: Option<&str>, end: Option<&str>, ffmpeg_config: &FfmpegConfig, progress_callback: F) -> Result<()> where F: Fn(Progress) + Send + Sync {
+fn extract_video_frames_with_progress<F>(input: &Path, out_dir: &Path, video_opts: &VideoOptions, ffmpeg_config: &FfmpegConfig, progress_callback: &F) -> Result<()> where F: Fn(Progress) + Send + Sync {
+    let columns = video_opts.columns;
+    let fps = video_opts.fps;
+    let start = video_opts.start.as_deref();
+    let end = video_opts.end.as_deref();
+
     let out_pattern = out_dir.join("frame_%04d.png");
 
     // Get video duration for progress calculation
-    let total_duration_us = get_video_duration_us(input, ffmpeg_config).unwrap_or(0);
+    let _total_duration_us = get_video_duration_us(input, ffmpeg_config).unwrap_or(0);
 
-    // Adjust duration if start/end are specified
-    let effective_duration_us = if let (Some(s), Some(e)) = (start, end) {
-        if !s.is_empty() && !e.is_empty() {
-            let start_secs = parse_timestamp(s);
-            let end_secs = parse_timestamp(e);
-            ((end_secs - start_secs) * 1_000_000.0) as u64
-        } else {
-            total_duration_us
-        }
-    } else if let Some(e) = end {
-        if !e.is_empty() {
-            (parse_timestamp(e) * 1_000_000.0) as u64
-        } else {
-            total_duration_us
-        }
-    } else {
-        total_duration_us
-    };
-
-    let mut ffmpeg_args: Vec<String> = vec![
-        "-loglevel".into(), "error".into(),
-        "-progress".into(), "pipe:1".into(),
-        "-nostats".into(),
-    ];
+    let mut ffmpeg_args: Vec<String> = vec!["-loglevel".into(), "error".into(), "-progress".into(), "pipe:1".into(), "-nostats".into()];
 
     if let Some(s) = start {
         if !s.is_empty() && s != "0" {
@@ -1084,7 +1056,7 @@ fn extract_video_frames_with_progress<F>(input: &Path, out_dir: &Path, columns: 
     }
 
     ffmpeg_args.push("-i".into());
-    ffmpeg_args.push(input.to_str().unwrap().to_string());
+    ffmpeg_args.push(input.to_str().ok_or_else(|| anyhow!("input path is not valid UTF-8"))?.to_string());
 
     if let Some(e) = end {
         if !e.is_empty() {
@@ -1111,9 +1083,7 @@ fn extract_video_frames_with_progress<F>(input: &Path, out_dir: &Path, columns: 
     let vf_option = format!("scale={}:-2,fps={}", columns, fps);
     ffmpeg_args.push("-vf".into());
     ffmpeg_args.push(vf_option);
-    ffmpeg_args.push(out_pattern.to_str().unwrap().to_string());
-
-    // Send initial progress
+    ffmpeg_args.push(out_pattern.to_str().ok_or_else(|| anyhow!("output path is not valid UTF-8"))?.to_string());
     progress_callback(Progress::extracting_frames());
 
     let mut child = ProcCommand::new(ffmpeg_config.ffmpeg_cmd())
@@ -1122,31 +1092,6 @@ fn extract_video_frames_with_progress<F>(input: &Path, out_dir: &Path, columns: 
         .stderr(Stdio::null())
         .spawn()
         .context("spawning ffmpeg")?;
-
-    // Read progress from ffmpeg stdout - throttle to only report every 1% change
-    if let Some(stdout) = child.stdout.take() {
-        let reader = BufReader::new(stdout);
-        let mut last_reported_percent: u64 = 0;
-
-        for line in reader.lines().map_while(Result::ok) {
-            // Parse out_time_us from ffmpeg progress output
-            if let Some(time_str) = line.strip_prefix("out_time_us=") {
-                if let Ok(time_us) = time_str.trim().parse::<u64>() {
-                    if effective_duration_us > 0 {
-                        let current_percent = (time_us * 100) / effective_duration_us;
-                        // Only report if percentage changed (throttle to ~100 updates max)
-                        if current_percent > last_reported_percent {
-                            last_reported_percent = current_percent;
-                            progress_callback(Progress::extracting_frames_progress(
-                                time_us,
-                                effective_duration_us,
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-    }
 
     let status = child.wait().context("waiting for ffmpeg")?;
     if !status.success() {
