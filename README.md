@@ -17,6 +17,13 @@ I recommend installing [cascii-viewer](https://github.com/cascii/cascii-viewer) 
 - **Presets**: `--small` and `--large` flags for quick quality adjustments.
 - **Non-interactive Mode**: Use `--default` to run without prompts, using default values.
 - **Library Support**: Use cascii as a dependency in your own Rust projects.
+- **Flexible FFmpeg**: Uses system ffmpeg by default, or accepts custom paths for bundled/embedded ffmpeg binaries.
+
+## Requirements
+
+- **FFmpeg**: Required for video conversion. cascii uses `ffmpeg` for frame extraction and `ffprobe` for video metadata.
+  - By default, cascii looks for `ffmpeg` and `ffprobe` on your system PATH
+  - For library usage, you can specify custom paths (useful for bundling ffmpeg with your application)
 
 ## Installation
 
@@ -227,6 +234,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         start: Some("0".to_string()),
         end: Some("10".to_string()),  // First 10 seconds
         columns: 400,
+        extract_audio: false,
     };
 
     // ASCII conversion options
@@ -258,7 +266,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Use built-in presets: "default", "small", or "large"
     let small_options = converter.options_from_preset("small")?;
-    
+
     converter.convert_image(
         Path::new("input.png"),
         Path::new("output.txt"),
@@ -269,6 +277,53 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+### Custom FFmpeg Path
+
+By default, cascii uses `ffmpeg` and `ffprobe` from your system PATH. If you need to use bundled binaries or a custom installation, use `FfmpegConfig`:
+
+```rust
+use cascii::{AsciiConverter, FfmpegConfig, VideoOptions, ConversionOptions};
+use std::path::Path;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Configure custom ffmpeg paths
+    let ffmpeg_config = FfmpegConfig::new()
+        .with_ffmpeg("/path/to/ffmpeg")
+        .with_ffprobe("/path/to/ffprobe");
+
+    // Create converter with custom ffmpeg paths
+    let converter = AsciiConverter::new()
+        .with_ffmpeg_config(ffmpeg_config);
+
+    let video_opts = VideoOptions {
+        fps: 30,
+        start: None,
+        end: None,
+        columns: 400,
+        extract_audio: false,
+    };
+
+    let conv_opts = ConversionOptions::default();
+
+    // Video conversion will use the specified ffmpeg binaries
+    converter.convert_video(
+        Path::new("video.mp4"),
+        Path::new("output_frames/"),
+        &video_opts,
+        &conv_opts,
+        false
+    )?;
+
+    Ok(())
+}
+```
+
+This is useful for:
+- **Desktop applications**: Bundle ffmpeg with your app for users who don't have it installed
+- **Tauri/Electron apps**: Use sidecar binaries
+- **Docker containers**: Use ffmpeg installed in a non-standard location
+- **Testing**: Use a specific ffmpeg version
+
 ### API Reference
 
 #### `AsciiConverter`
@@ -278,6 +333,7 @@ Main converter struct for ASCII art generation.
 **Methods:**
 - `new()` - Create converter with default configuration
 - `with_config(config: AppConfig)` - Create with custom configuration
+- `with_ffmpeg_config(config: FfmpegConfig)` - Set custom ffmpeg/ffprobe paths
 - `from_config_file(path: &Path)` - Load configuration from file
 - `convert_image(input, output, options)` - Convert image to ASCII file
 - `image_to_string(input, options)` - Convert image to ASCII string
@@ -285,6 +341,15 @@ Main converter struct for ASCII art generation.
 - `convert_directory(input_dir, output_dir, options, keep_images)` - Convert directory of images
 - `get_preset(name)` - Get a preset by name
 - `options_from_preset(name)` - Get conversion options from a preset
+
+#### `FfmpegConfig`
+
+Configuration for ffmpeg/ffprobe binary paths.
+
+**Methods:**
+- `new()` - Create with default settings (uses system PATH)
+- `with_ffmpeg(path)` - Set custom ffmpeg binary path
+- `with_ffprobe(path)` - Set custom ffprobe binary path
 
 #### `ConversionOptions`
 
@@ -312,6 +377,7 @@ Options for video conversion.
 - `start: Option<String>` - Start time (e.g., "00:01:23" or "83")
 - `end: Option<String>` - End time
 - `columns: u32` - Target width in characters
+- `extract_audio: bool` - Whether to extract audio track from video
 
 ### Examples
 
