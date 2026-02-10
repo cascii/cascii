@@ -97,9 +97,100 @@ cascii my_video.mp4 --start 00:00:10 --end 00:00:15
 - `--default`: Skips all prompts and uses default values for any missing arguments.
 - `-s`, `--small`: Uses smaller default values for quality settings.
 - `-l`, `--large`: Uses larger default values for quality settings.
+- `--colors`: Generate both `.txt` and `.cframe` (color) output files.
+- `--color-only`: Generate only `.cframe` files (no `.txt`).
+- `--audio`: Extract audio from the video to `audio.mp3`.
+- `--luminance`: Luminance threshold (0-255) for what is considered transparent.
+- `--keep-images`: Keep intermediate PNG frames after conversion.
+- `--to-video`: Render ASCII frames into a video file (`.mp4`) instead of frame files. See [Export Movie](#export-movie).
+- `--video-font-size`: Font size in pixels for `--to-video` rendering (default: `14`).
+- `--crf`: CRF quality for `--to-video` encoding (0-51, lower = better, default: `18`).
+- `--trim`: Trim equally from all sides of existing frames. Directional overrides: `--trim-left`, `--trim-right`, `--trim-top`, `--trim-bottom`.
+- `--find-loop`: Detect repeated frame loops in a directory of `frame_*.txt` files.
 - `-h`, `--help`: Shows the help message.
 - `-V`, `--version`: Shows the version information.
 
+# Export Movie
+
+`cascii` can render ASCII art frames into an MP4 video file using `--to-video`. This works both from a source video (full pipeline) and from a directory of previously generated frames.
+
+## From a Video File
+
+Convert a video to an ASCII video in one command:
+
+```bash
+# White on black (default)
+cascii input.mp4 --to-video --default
+
+# Color — each character rendered in its original pixel color
+cascii input.mp4 --to-video --colors --default
+
+# Color with audio
+cascii input.mp4 --to-video --colors --audio --default
+```
+
+## From Existing Frames
+
+If you already have a directory of `.cframe` or `.txt` files from a previous `cascii` run, you can render them to video directly:
+
+```bash
+# From .cframe files (color) — auto-detected if present
+cascii ./my_frames/ --to-video --fps 30 --default
+
+# From .txt files (white on black) — used if no .cframe files exist
+cascii ./my_frames/ --to-video --fps 24 --default
+
+# With audio (uses audio.mp3 from the directory if present)
+cascii ./my_frames/ --to-video --fps 30 --audio --default
+```
+
+When rendering from a directory, `cascii` scans for `.cframe` files first (full color). If none are found, it falls back to `.txt` files (white on black).
+
+## Options
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--to-video` | Enable video output mode | off |
+| `--colors` / `--color-only` | Generate color data (needed for color video from a source video) | off (white on black) |
+| `--video-font-size <PX>` | Font size in pixels — controls output video resolution | `14` |
+| `--crf <0-51>` | H.264 quality (lower = better quality, larger file) | `18` (visually lossless) |
+| `--audio` | Mux audio into the output video | off |
+| `--columns <N>` | ASCII width in characters | `400` |
+| `--fps <N>` | Frames per second | `30` |
+
+**Output resolution** is determined by `columns × font_size`. For example:
+
+| Columns | Font Size | Approximate Width |
+|---------|-----------|-------------------|
+| 120 | 10 | ~960px |
+| 200 | 14 | ~2800px |
+| 200 | 32 | ~6400px |
+| 400 | 14 | ~5600px |
+
+## Examples
+
+```bash
+# Small compact video
+cascii input.mp4 --to-video --colors --default --columns 120 --video-font-size 10
+
+# Medium, readable characters
+cascii input.mp4 --to-video --colors --default --columns 200 --video-font-size 14
+
+# Large characters, high resolution
+cascii input.mp4 --to-video --colors --default --columns 200 --video-font-size 32
+
+# Lower quality, smaller file size
+cascii input.mp4 --to-video --colors --default --crf 28
+
+# Custom output path
+cascii input.mp4 --to-video --colors --default -o my_ascii_video.mp4
+
+# Specific time range with audio
+cascii input.mp4 --to-video --colors --audio --default --start 00:00:10 --end 00:00:20
+
+# Render existing frames to video
+cascii ./my_frames/ --to-video --fps 30 --default --video-font-size 12
+```
 
 ### Examples:
 
@@ -338,6 +429,8 @@ Main converter struct for ASCII art generation.
 - `convert_image(input, output, options)` - Convert image to ASCII file
 - `image_to_string(input, options)` - Convert image to ASCII string
 - `convert_video(input, output_dir, video_opts, conv_opts, keep_images)` - Convert video to ASCII frames
+- `convert_video_to_video(input, video_opts, conv_opts, to_video_opts, callback)` - Convert video to ASCII video file (.mp4)
+- `render_frames_to_video(input_dir, fps, to_video_opts, callback)` - Render existing .cframe/.txt frames to video file
 - `convert_directory(input_dir, output_dir, options, keep_images)` - Convert directory of images
 - `get_preset(name)` - Get a preset by name
 - `options_from_preset(name)` - Get conversion options from a preset
@@ -378,6 +471,16 @@ Options for video conversion.
 - `end: Option<String>` - End time
 - `columns: u32` - Target width in characters
 - `extract_audio: bool` - Whether to extract audio track from video
+
+#### `ToVideoOptions`
+
+Options for rendering ASCII frames to a video file.
+
+**Fields:**
+- `output_path: PathBuf` - Output video file path (e.g., "output.mp4")
+- `font_size: f32` - Font size in pixels for rendering (default: 14.0)
+- `crf: u8` - H.264 quality, 0-51 (default: 18, visually lossless)
+- `mux_audio: bool` - Whether to mux audio into the output video
 
 ### Examples
 
