@@ -55,21 +55,28 @@
 //!                 println!("Converting: {}/{} ({:.1}%)",
 //!                     progress.completed, progress.total, progress.percentage);
 //!             }
+//!             ProgressPhase::RenderingVideo => println!("Rendering video..."),
 //!             ProgressPhase::Complete => println!("Done!"),
 //!         }
 //!     },
 //! ).unwrap();
 //! ```
 
+use ab_glyph::{FontRef, PxScale, ScaleFont};
 use anyhow::{anyhow, Context, Result};
 use image::DynamicImage;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcCommand, Stdio};
 use walkdir::WalkDir;
+
+/// Embedded monospace font for video rendering
+const FONT_DATA: &[u8] = include_bytes!("../resources/DejaVuSansMono.ttf");
 
 /// Configuration for ffmpeg/ffprobe binary paths
 ///
@@ -127,6 +134,8 @@ pub enum ProgressPhase {
     ExtractingAudio,
     /// Converting extracted frames to ASCII art
     ConvertingFrames,
+    /// Rendering ASCII frames to video and encoding with ffmpeg
+    RenderingVideo,
     /// Conversion completed successfully
     Complete,
 }
@@ -201,6 +210,22 @@ impl Progress {
             total,
             percentage,
             message: format!("Converting frame {} of {}", completed, total),
+        }
+    }
+
+    /// Create a progress update for rendering video frames
+    pub fn rendering_video(completed: usize, total: usize) -> Self {
+        let percentage = if total > 0 {
+            (completed as f64 / total as f64) * 100.0
+        } else {
+            0.0
+        };
+        Self {
+            phase: ProgressPhase::RenderingVideo,
+            completed,
+            total,
+            percentage,
+            message: format!("Rendering frame {} of {}", completed, total),
         }
     }
 
@@ -428,6 +453,227 @@ impl Default for VideoOptions {
             extract_audio: false,
         }
     }
+}
+
+/// Options for rendering ASCII frames to a video file
+#[derive(Debug, Clone)]
+pub struct ToVideoOptions {
+    /// Output video file path (e.g., "output.mp4")
+    pub output_path: PathBuf,
+    /// Font size in pixels for rendering characters (determines output resolution)
+    pub font_size: f32,
+    /// CRF quality for H.264 encoding (0-51, lower is better quality, 18 is visually lossless)
+    pub crf: u8,
+    /// Whether to mux audio from the source video into the output
+    pub mux_audio: bool,
+}
+
+impl Default for ToVideoOptions {
+    fn default() -> Self {
+        Self {
+            output_path: PathBuf::from("output.mp4"),
+            font_size: 14.0,
+            crf: 18,
+            mux_audio: false,
+        }
+    }
+}
+
+/// Pre-rasterized bitmap for a single glyph
+struct GlyphBitmap {
+    /// Alpha coverage values, row-major, cell_width * cell_height entries
+    alpha: Vec<f32>,
+}
+
+/// Pre-rasterized monospace glyph atlas for fast frame rendering
+struct GlyphAtlas {
+    /// Rasterized glyph bitmaps keyed by ASCII byte value
+    glyphs: HashMap<u8, GlyphBitmap>,
+    /// Width of each character cell in pixels
+    cell_width: u32,
+    /// Height of each character cell in pixels
+    cell_height: u32,
+}
+
+/// Intermediate representation of one converted ASCII frame
+struct AsciiFrameData {
+    /// The ASCII text (with newlines between rows)
+    ascii_text: String,
+    /// Width in characters
+    width_chars: u32,
+    /// Height in characters (rows)
+    height_chars: u32,
+    /// Flat RGB color data, 3 bytes per character, row-major
+    rgb_colors: Vec<u8>,
+}
+
+fn build_glyph_atlas(font_size: f32) -> Result<GlyphAtlas> {
+    use ab_glyph::Font;
+
+    let font = FontRef::try_from_slice(FONT_DATA)
+        .map_err(|e| anyhow!("failed to load embedded font: {}", e))?;
+
+    let scale = PxScale::from(font_size);
+    let scaled_font = font.as_scaled(scale);
+
+    // Determine cell dimensions from font metrics
+    // Use 'M' as reference for advance width
+    let h_advance = scaled_font.h_advance(font.glyph_id('M'));
+    let cell_width = h_advance.ceil() as u32;
+    let cell_height = (scaled_font.ascent() - scaled_font.descent()).ceil() as u32;
+    let ascent = scaled_font.ascent();
+
+    let mut glyphs = HashMap::new();
+
+    for byte in 32u8..=126u8 {
+        let ch = byte as char;
+        let glyph_id = font.glyph_id(ch);
+        let glyph = glyph_id.with_scale_and_position(scale, ab_glyph::point(0.0, ascent));
+
+        let mut alpha = vec![0.0f32; (cell_width * cell_height) as usize];
+
+        if let Some(outlined) = font.outline_glyph(glyph) {
+            outlined.draw(|gx, gy, coverage| {
+                let px = gx;
+                let py = gy;
+                if px < cell_width && py < cell_height {
+                    alpha[(py * cell_width + px) as usize] = coverage;
+                }
+            });
+        }
+
+        glyphs.insert(byte, GlyphBitmap { alpha });
+    }
+
+    Ok(GlyphAtlas {
+        glyphs,
+        cell_width,
+        cell_height,
+    })
+}
+
+fn render_ascii_frame_to_rgb(
+    frame: &AsciiFrameData,
+    atlas: &GlyphAtlas,
+    use_colors: bool,
+) -> Vec<u8> {
+    let mut pixel_w = frame.width_chars * atlas.cell_width;
+    let mut pixel_h = frame.height_chars * atlas.cell_height;
+
+    // H.264 requires even dimensions
+    if !pixel_w.is_multiple_of(2) {
+        pixel_w += 1;
+    }
+    if !pixel_h.is_multiple_of(2) {
+        pixel_h += 1;
+    }
+
+    let mut buffer = vec![0u8; (pixel_w * pixel_h * 3) as usize];
+
+    let mut char_idx: usize = 0;
+    let mut row: u32 = 0;
+    let mut col: u32 = 0;
+
+    for ch in frame.ascii_text.chars() {
+        if ch == '\n' {
+            row += 1;
+            col = 0;
+            continue;
+        }
+
+        let byte = ch as u8;
+
+        // Get color for this character
+        let (r, g, b) = if use_colors && char_idx * 3 + 2 < frame.rgb_colors.len() {
+            (
+                frame.rgb_colors[char_idx * 3],
+                frame.rgb_colors[char_idx * 3 + 1],
+                frame.rgb_colors[char_idx * 3 + 2],
+            )
+        } else {
+            (255, 255, 255) // white for text-only mode
+        };
+
+        // Look up glyph bitmap
+        if let Some(glyph_bitmap) = atlas.glyphs.get(&byte) {
+            let base_x = col * atlas.cell_width;
+            let base_y = row * atlas.cell_height;
+
+            for gy in 0..atlas.cell_height {
+                for gx in 0..atlas.cell_width {
+                    let px = base_x + gx;
+                    let py = base_y + gy;
+                    if px >= pixel_w || py >= pixel_h {
+                        continue;
+                    }
+                    let alpha = glyph_bitmap.alpha[(gy * atlas.cell_width + gx) as usize];
+                    if alpha > 0.0 {
+                        let offset = ((py * pixel_w + px) * 3) as usize;
+                        buffer[offset] = (r as f32 * alpha) as u8;
+                        buffer[offset + 1] = (g as f32 * alpha) as u8;
+                        buffer[offset + 2] = (b as f32 * alpha) as u8;
+                    }
+                }
+            }
+        }
+
+        char_idx += 1;
+        col += 1;
+    }
+
+    buffer
+}
+
+fn spawn_ffmpeg_encoder(
+    pixel_width: u32,
+    pixel_height: u32,
+    fps: u32,
+    crf: u8,
+    audio_path: Option<&Path>,
+    output_path: &Path,
+    ffmpeg_config: &FfmpegConfig,
+) -> Result<std::process::Child> {
+    let size = format!("{}x{}", pixel_width, pixel_height);
+
+    let mut args: Vec<String> = vec![
+        "-y".into(),
+        "-loglevel".into(), "error".into(),
+        "-f".into(), "rawvideo".into(),
+        "-pix_fmt".into(), "rgb24".into(),
+        "-s:v".into(), size,
+        "-r".into(), fps.to_string(),
+        "-i".into(), "pipe:0".into(),
+    ];
+
+    if let Some(audio) = audio_path {
+        args.push("-i".into());
+        args.push(audio.to_str().unwrap_or("audio.mp3").to_string());
+        args.push("-c:a".into());
+        args.push("aac".into());
+        args.push("-b:a".into());
+        args.push("192k".into());
+        args.push("-shortest".into());
+    }
+
+    args.push("-c:v".into());
+    args.push("libx264".into());
+    args.push("-crf".into());
+    args.push(crf.to_string());
+    args.push("-preset".into());
+    args.push("medium".into());
+    args.push("-pix_fmt".into());
+    args.push("yuv420p".into());
+    args.push(output_path.to_str().ok_or_else(|| anyhow!("output path is not valid UTF-8"))?.to_string());
+
+    let child = ProcCommand::new(ffmpeg_config.ffmpeg_cmd())
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("spawning ffmpeg encoder")?;
+
+    Ok(child)
 }
 
 /// Main converter struct for ASCII art generation
@@ -695,6 +941,9 @@ impl AsciiConverter {
     ///                 println!("Converting: {}/{} ({:.1}%)",
     ///                     progress.completed, progress.total, progress.percentage);
     ///             }
+    ///             ProgressPhase::RenderingVideo => {
+    ///                 println!("Rendering video...");
+    ///             }
     ///             ProgressPhase::Complete => {
     ///                 println!("Conversion complete!");
     ///             }
@@ -808,6 +1057,360 @@ impl AsciiConverter {
             .get_preset(preset_name)
             .ok_or_else(|| anyhow!("Preset '{}' not found", preset_name))?;
         Ok(ConversionOptions::from_preset(preset, self.config.ascii_chars.clone()))
+    }
+
+    /// Convert a video to an ASCII-art video file
+    ///
+    /// Extracts frames from the input video, converts each to ASCII art,
+    /// renders the ASCII characters to pixel buffers, and pipes them to
+    /// ffmpeg to produce an output MP4 video.
+    pub fn convert_video_to_video<F>(
+        &self,
+        input: &Path,
+        video_opts: &VideoOptions,
+        conv_opts: &ConversionOptions,
+        to_video_opts: &ToVideoOptions,
+        progress_callback: F,
+    ) -> Result<ConversionResult>
+    where
+        F: Fn(Progress) + Send + Sync,
+    {
+        // Create temp directory for intermediate PNG frames
+        let temp_dir = std::env::temp_dir().join(format!("cascii_tovideo_{}", std::process::id()));
+        fs::create_dir_all(&temp_dir).context("creating temp directory")?;
+
+        // Ensure cleanup on exit (both success and error paths)
+        let result = self.convert_video_to_video_inner(
+            input,
+            video_opts,
+            conv_opts,
+            to_video_opts,
+            &temp_dir,
+            &progress_callback,
+        );
+
+        // Clean up temp directory
+        let _ = fs::remove_dir_all(&temp_dir);
+
+        result
+    }
+
+    fn convert_video_to_video_inner<F>(
+        &self,
+        input: &Path,
+        video_opts: &VideoOptions,
+        conv_opts: &ConversionOptions,
+        to_video_opts: &ToVideoOptions,
+        temp_dir: &Path,
+        progress_callback: &F,
+    ) -> Result<ConversionResult>
+    where
+        F: Fn(Progress) + Send + Sync,
+    {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        // Phase 1: Extract frames from video
+        extract_video_frames_with_progress(input, temp_dir, video_opts, &self.ffmpeg_config, progress_callback)?;
+
+        // Phase 2: Extract audio if requested
+        let audio_path = if to_video_opts.mux_audio {
+            progress_callback(Progress::extracting_audio());
+            extract_audio(input, temp_dir, video_opts.start.as_deref(), video_opts.end.as_deref(), &self.ffmpeg_config)?;
+            Some(temp_dir.join("audio.mp3"))
+        } else {
+            None
+        };
+
+        // Collect and sort PNG frame paths
+        let mut png_paths: Vec<PathBuf> = WalkDir::new(temp_dir)
+            .min_depth(1)
+            .max_depth(1)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .map(|e| e.into_path())
+            .filter(|p| p.extension().map(|e| e == "png").unwrap_or(false))
+            .collect();
+        png_paths.sort();
+
+        let total_frames = png_paths.len();
+        if total_frames == 0 {
+            return Err(anyhow!("No frames extracted from video"));
+        }
+
+        // Phase 3: Build glyph atlas
+        let atlas = build_glyph_atlas(to_video_opts.font_size)?;
+
+        // Phase 4: Convert first frame to determine output resolution
+        let ascii_chars = conv_opts.ascii_chars.as_bytes();
+        let (first_ascii, first_w, first_h, _) = image_to_ascii_with_colors(
+            &png_paths[0],
+            conv_opts.font_ratio,
+            conv_opts.luminance,
+            conv_opts.columns,
+            ascii_chars,
+        )?;
+        let _ = first_ascii; // we only need dimensions
+
+        let mut pixel_w = first_w * atlas.cell_width;
+        let mut pixel_h = first_h * atlas.cell_height;
+        // H.264 requires even dimensions
+        if pixel_w % 2 != 0 { pixel_w += 1; }
+        if pixel_h % 2 != 0 { pixel_h += 1; }
+
+        // Phase 5: Spawn ffmpeg encoder
+        let mut child = spawn_ffmpeg_encoder(
+            pixel_w,
+            pixel_h,
+            video_opts.fps,
+            to_video_opts.crf,
+            audio_path.as_deref(),
+            &to_video_opts.output_path,
+            &self.ffmpeg_config,
+        )?;
+
+        let mut stdin = child.stdin.take()
+            .ok_or_else(|| anyhow!("failed to open ffmpeg stdin pipe"))?;
+
+        let use_colors = conv_opts.output_mode != OutputMode::TextOnly;
+
+        // Phase 6: Process frames in batches
+        let batch_size = 100;
+        let completed = Arc::new(AtomicUsize::new(0));
+
+        progress_callback(Progress::rendering_video(0, total_frames));
+
+        for batch_start in (0..total_frames).step_by(batch_size) {
+            let batch_end = (batch_start + batch_size).min(total_frames);
+            let batch = &png_paths[batch_start..batch_end];
+
+            // Convert batch in parallel to AsciiFrameData
+            let frame_data: Vec<AsciiFrameData> = batch
+                .par_iter()
+                .map(|path| {
+                    let (ascii_text, width_chars, height_chars, rgb_colors) =
+                        image_to_ascii_with_colors(
+                            path,
+                            conv_opts.font_ratio,
+                            conv_opts.luminance,
+                            conv_opts.columns,
+                            ascii_chars,
+                        )?;
+                    Ok(AsciiFrameData {
+                        ascii_text,
+                        width_chars,
+                        height_chars,
+                        rgb_colors,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            // Render and pipe sequentially (preserves frame order)
+            for frame in &frame_data {
+                let rgb_buf = render_ascii_frame_to_rgb(frame, &atlas, use_colors);
+                if let Err(e) = stdin.write_all(&rgb_buf) {
+                    // Check if ffmpeg died
+                    drop(stdin);
+                    let output = child.wait_with_output().context("waiting for ffmpeg")?;
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return Err(anyhow!("ffmpeg encoding failed: {} (stderr: {})", e, stderr));
+                }
+
+                let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                let current_percent = if total_frames > 0 { (current * 100) / total_frames } else { 0 };
+                let last_percent = if current > 1 { ((current - 1) * 100) / total_frames } else { 0 };
+
+                if current_percent > last_percent || current == total_frames {
+                    progress_callback(Progress::rendering_video(current, total_frames));
+                }
+            }
+        }
+
+        // Close stdin to signal end of input
+        drop(stdin);
+
+        // Wait for ffmpeg to finish
+        let output = child.wait_with_output().context("waiting for ffmpeg")?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!("ffmpeg encoding failed: {}", stderr));
+        }
+
+        // Phase 7: Complete
+        progress_callback(Progress::complete(total_frames));
+
+        let output_mode_str = match conv_opts.output_mode {
+            OutputMode::TextOnly => "text-only",
+            OutputMode::ColorOnly => "color-only",
+            OutputMode::TextAndColor => "text+color",
+        };
+
+        Ok(ConversionResult {
+            frame_count: total_frames,
+            columns: conv_opts.columns.unwrap_or(video_opts.columns),
+            font_ratio: conv_opts.font_ratio,
+            luminance: conv_opts.luminance,
+            fps: Some(video_opts.fps),
+            output_mode: output_mode_str.to_string(),
+            audio_extracted: to_video_opts.mux_audio,
+            output_dir: to_video_opts.output_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
+        })
+    }
+
+    /// Render existing ASCII frame files (.cframe or .txt) from a directory to a video file
+    ///
+    /// Scans the directory for .cframe files first; if none found, falls back to .txt files.
+    /// Renders each frame using the glyph atlas and pipes to ffmpeg.
+    pub fn render_frames_to_video<F>(
+        &self,
+        input_dir: &Path,
+        fps: u32,
+        to_video_opts: &ToVideoOptions,
+        progress_callback: F,
+    ) -> Result<ConversionResult>
+    where
+        F: Fn(Progress) + Send + Sync,
+    {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        // Scan for .cframe files first, then fall back to .txt
+        let mut frame_paths: Vec<PathBuf> = WalkDir::new(input_dir)
+            .min_depth(1)
+            .max_depth(1)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .map(|e| e.into_path())
+            .filter(|p| p.extension().map(|e| e == "cframe").unwrap_or(false))
+            .collect();
+
+        let use_cframes = !frame_paths.is_empty();
+
+        if !use_cframes {
+            frame_paths = WalkDir::new(input_dir)
+                .min_depth(1)
+                .max_depth(1)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .map(|e| e.into_path())
+                .filter(|p| {
+                    p.extension().map(|e| e == "txt").unwrap_or(false)
+                        && p.file_name()
+                            .and_then(|n| n.to_str())
+                            .map(|n| n.starts_with("frame_"))
+                            .unwrap_or(false)
+                })
+                .collect();
+        }
+
+        frame_paths.sort();
+
+        let total_frames = frame_paths.len();
+        if total_frames == 0 {
+            return Err(anyhow!("No .cframe or .txt frame files found in {}", input_dir.display()));
+        }
+
+        // Build glyph atlas
+        let atlas = build_glyph_atlas(to_video_opts.font_size)?;
+
+        // Read first frame to determine pixel dimensions
+        let first_frame = if use_cframes {
+            read_cframe_to_frame_data(&frame_paths[0])?
+        } else {
+            read_txt_to_frame_data(&frame_paths[0])?
+        };
+
+        let mut pixel_w = first_frame.width_chars * atlas.cell_width;
+        let mut pixel_h = first_frame.height_chars * atlas.cell_height;
+        if !pixel_w.is_multiple_of(2) { pixel_w += 1; }
+        if !pixel_h.is_multiple_of(2) { pixel_h += 1; }
+
+        // Check for audio.mp3 in the directory
+        let audio_path = if to_video_opts.mux_audio {
+            let ap = input_dir.join("audio.mp3");
+            if ap.exists() { Some(ap) } else { None }
+        } else {
+            None
+        };
+
+        // Spawn ffmpeg encoder
+        let mut child = spawn_ffmpeg_encoder(
+            pixel_w,
+            pixel_h,
+            fps,
+            to_video_opts.crf,
+            audio_path.as_deref(),
+            &to_video_opts.output_path,
+            &self.ffmpeg_config,
+        )?;
+
+        let mut stdin = child.stdin.take()
+            .ok_or_else(|| anyhow!("failed to open ffmpeg stdin pipe"))?;
+
+        // Process frames in batches
+        let batch_size = 100;
+        let completed = Arc::new(AtomicUsize::new(0));
+
+        progress_callback(Progress::rendering_video(0, total_frames));
+
+        for batch_start in (0..total_frames).step_by(batch_size) {
+            let batch_end = (batch_start + batch_size).min(total_frames);
+            let batch = &frame_paths[batch_start..batch_end];
+
+            // Read batch in parallel
+            let frame_data: Vec<AsciiFrameData> = batch
+                .par_iter()
+                .map(|path| {
+                    if use_cframes {
+                        read_cframe_to_frame_data(path)
+                    } else {
+                        read_txt_to_frame_data(path)
+                    }
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            // Render and pipe sequentially
+            for frame in &frame_data {
+                let rgb_buf = render_ascii_frame_to_rgb(frame, &atlas, use_cframes);
+                if let Err(e) = stdin.write_all(&rgb_buf) {
+                    drop(stdin);
+                    let output = child.wait_with_output().context("waiting for ffmpeg")?;
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return Err(anyhow!("ffmpeg encoding failed: {} (stderr: {})", e, stderr));
+                }
+
+                let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                let current_percent = if total_frames > 0 { (current * 100) / total_frames } else { 0 };
+                let last_percent = if current > 1 { ((current - 1) * 100) / total_frames } else { 0 };
+
+                if current_percent > last_percent || current == total_frames {
+                    progress_callback(Progress::rendering_video(current, total_frames));
+                }
+            }
+        }
+
+        drop(stdin);
+
+        let output = child.wait_with_output().context("waiting for ffmpeg")?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!("ffmpeg encoding failed: {}", stderr));
+        }
+
+        progress_callback(Progress::complete(total_frames));
+
+        let mode_str = if use_cframes { "color" } else { "text-only" };
+
+        Ok(ConversionResult {
+            frame_count: total_frames,
+            columns: first_frame.width_chars,
+            font_ratio: 0.0,
+            luminance: 0,
+            fps: Some(fps),
+            output_mode: mode_str.to_string(),
+            audio_extracted: audio_path.is_some(),
+            output_dir: to_video_opts.output_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
+        })
     }
 }
 
@@ -937,6 +1540,73 @@ fn write_cframe_binary(width: u32, height: u32, ascii_content: &str, rgb_data: &
         char_idx += 1;
     }
     Ok(())
+}
+
+/// Read a .cframe binary file into AsciiFrameData
+fn read_cframe_to_frame_data(path: &Path) -> Result<AsciiFrameData> {
+    let data = fs::read(path).with_context(|| format!("reading cframe {}", path.display()))?;
+    if data.len() < 8 {
+        return Err(anyhow!("cframe file too small: {}", path.display()));
+    }
+
+    let width = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+    let height = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let expected_body = (width * height * 4) as usize;
+
+    if data.len() < 8 + expected_body {
+        return Err(anyhow!(
+            "cframe file truncated: expected {} body bytes, got {} in {}",
+            expected_body,
+            data.len() - 8,
+            path.display()
+        ));
+    }
+
+    let mut ascii_text = String::with_capacity((width as usize + 1) * height as usize);
+    let mut rgb_colors = Vec::with_capacity((width * height * 3) as usize);
+
+    for row in 0..height {
+        for col in 0..width {
+            let idx = 8 + ((row * width + col) * 4) as usize;
+            let ch = data[idx] as char;
+            ascii_text.push(ch);
+            rgb_colors.push(data[idx + 1]); // R
+            rgb_colors.push(data[idx + 2]); // G
+            rgb_colors.push(data[idx + 3]); // B
+        }
+        ascii_text.push('\n');
+    }
+
+    Ok(AsciiFrameData {
+        ascii_text,
+        width_chars: width,
+        height_chars: height,
+        rgb_colors,
+    })
+}
+
+/// Read a .txt ASCII frame file into AsciiFrameData (white-on-black, no color)
+fn read_txt_to_frame_data(path: &Path) -> Result<AsciiFrameData> {
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("reading txt frame {}", path.display()))?;
+    let lines: Vec<&str> = content.lines().collect();
+
+    if lines.is_empty() {
+        return Err(anyhow!("empty frame file: {}", path.display()));
+    }
+
+    let width = lines[0].len() as u32;
+    let height = lines.len() as u32;
+
+    // Rebuild with consistent newlines
+    let ascii_text = lines.join("\n") + "\n";
+
+    Ok(AsciiFrameData {
+        ascii_text,
+        width_chars: width,
+        height_chars: height,
+        rgb_colors: Vec::new(), // empty = renderer uses white
+    })
 }
 
 fn luminance(rgb: image::Rgb<u8>) -> u8 {
