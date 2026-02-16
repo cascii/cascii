@@ -260,40 +260,60 @@ pub struct ConversionResult {
     pub audio_extracted: bool,
     /// Path to the output directory
     pub output_dir: PathBuf,
+    /// Background color name
+    pub background_color: String,
+    /// Foreground color name
+    pub color: String,
+}
+
+/// Serializable details written to `details.toml`
+#[derive(Debug, Serialize)]
+struct Details {
+    version: String,
+    frames: usize,
+    luminance: u8,
+    font_ratio: f32,
+    columns: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fps: Option<u32>,
+    output: String,
+    audio: bool,
+    background_color: String,
+    color: String,
 }
 
 impl ConversionResult {
-    /// Write the conversion details to a details.md file in the output directory
-    pub fn write_details_file(&self) -> Result<PathBuf> {
-        let details_path = self.output_dir.join("details.md");
-
-        let mut details = format!("Version: {}\nFrames: {}\nLuminance: {}\nFont Ratio: {}\nColumns: {}", env!("CARGO_PKG_VERSION"), self.frame_count, self.luminance, self.font_ratio, self.columns);
-
-        if let Some(fps) = self.fps {
-            details.push_str(&format!("\nFPS: {}", fps));
+    fn to_details(&self) -> Details {
+        Details {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            frames: self.frame_count,
+            luminance: self.luminance,
+            font_ratio: self.font_ratio,
+            columns: self.columns,
+            fps: self.fps,
+            output: self.output_mode.clone(),
+            audio: self.audio_extracted,
+            background_color: self.background_color.clone(),
+            color: self.color.clone(),
         }
+    }
 
-        details.push_str(&format!("\nOutput: {}", self.output_mode));
-        details.push_str(&format!("\nAudio: {}", self.audio_extracted));
+    /// Write the conversion details to a details.toml file in the output directory
+    pub fn write_details_file(&self) -> Result<PathBuf> {
+        let details_path = self.output_dir.join("details.toml");
+        let toml_string = toml::to_string_pretty(&self.to_details())
+            .context("serializing details to TOML")?;
 
-        fs::write(&details_path, &details)
+        fs::write(&details_path, &toml_string)
             .with_context(|| format!("writing details file to {}", details_path.display()))?;
 
         Ok(details_path)
     }
 
-    /// Get the details as a string (without writing to file)
+    /// Get the details as a TOML string (without writing to file)
     pub fn to_details_string(&self) -> String {
-        let mut details = format!("Version: {}\nFrames: {}\nLuminance: {}\nFont Ratio: {}\nColumns: {}", env!("CARGO_PKG_VERSION"), self.frame_count, self.luminance, self.font_ratio, self.columns);
-
-        if let Some(fps) = self.fps {
-            details.push_str(&format!("\nFPS: {}", fps));
-        }
-
-        details.push_str(&format!("\nOutput: {}", self.output_mode));
-        details.push_str(&format!("\nAudio: {}", self.audio_extracted));
-
-        details
+        toml::to_string_pretty(&self.to_details())
+            .expect("failed to serialize details to TOML")
     }
 }
 
@@ -891,9 +911,11 @@ impl AsciiConverter {
             output_mode: output_mode_str.to_string(),
             audio_extracted: video_opts.extract_audio,
             output_dir: output_dir.to_path_buf(),
+            background_color: "black".to_string(),
+            color: "white".to_string(),
         };
 
-        // Write the details.md file
+        // Write the details.toml file
         result.write_details_file()?;
 
         Ok(result)
@@ -986,9 +1008,11 @@ impl AsciiConverter {
             output_mode: output_mode_str.to_string(),
             audio_extracted: video_opts.extract_audio,
             output_dir: output_dir.to_path_buf(),
+            background_color: "black".to_string(),
+            color: "white".to_string(),
         };
 
-        // Write the details.md file
+        // Write the details.toml file
         result.write_details_file()?;
 
         Ok(result)
@@ -1254,6 +1278,8 @@ impl AsciiConverter {
             output_mode: output_mode_str.to_string(),
             audio_extracted: to_video_opts.mux_audio,
             output_dir: to_video_opts.output_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
+            background_color: "black".to_string(),
+            color: "white".to_string(),
         })
     }
 
@@ -1410,6 +1436,8 @@ impl AsciiConverter {
             output_mode: mode_str.to_string(),
             audio_extracted: audio_path.is_some(),
             output_dir: to_video_opts.output_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
+            background_color: "black".to_string(),
+            color: "white".to_string(),
         })
     }
 }

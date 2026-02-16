@@ -660,7 +660,7 @@ fn main() -> Result<()> {
             println!("Converting directory of images...");
             converter.convert_directory(input_path, &output_path, &conv_opts, args.keep_images)?;
 
-            // For directory conversion, create details.md manually since it doesn't go through video conversion
+            // For directory conversion, create details.toml manually since it doesn't go through video conversion
             let frame_ext = if output_mode == OutputMode::ColorOnly { "cframe" } else { "txt" };
             let frame_count = WalkDir::new(&output_path)
                 .min_depth(1)
@@ -676,18 +676,21 @@ fn main() -> Result<()> {
                 OutputMode::TextAndColor => "text+color",
             };
 
-            let details = format!(
-                "Version: {}\nFrames: {}\nLuminance: {}\nFont Ratio: {}\nColumns: {}\nOutput: {}",
-                env!("CARGO_PKG_VERSION"),
+            let result = cascii::ConversionResult {
                 frame_count,
-                luminance,
-                font_ratio,
                 columns,
-                mode_str
-            );
+                font_ratio,
+                luminance,
+                fps: None,
+                output_mode: mode_str.to_string(),
+                audio_extracted: false,
+                output_dir: output_path.clone(),
+                background_color: "black".to_string(),
+                color: "white".to_string(),
+            };
 
-            let details_path = output_path.join("details.md");
-            fs::write(&details_path, &details).context("writing details file")?;
+            result.write_details_file().context("writing details file")?;
+            let details = result.to_details_string();
 
             if args.log_details {
                 println!("\n--- Generation Details ---");

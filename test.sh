@@ -10,7 +10,7 @@ cargo build
 find ./tests/video/output -type f -name "*.png" -delete
 
 # Clean up output and expected directories
-find ./tests/video/output -type f -name "details.md" -delete
+find ./tests/video/output -type f -name "details.toml" -delete
 find ./tests/video/output -type f -name ".DS_Store" -delete
 # Clean up any stray files in repo (none expected for viewer now)
 
