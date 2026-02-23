@@ -15,6 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         end: Some("2".to_string()), // Extract first 2 seconds
         columns: 200,
         extract_audio: false,
+        preprocess_filter: None,
     };
 
     // Configure conversion options

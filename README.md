@@ -94,6 +94,9 @@ cascii my_video.mp4 --start 00:00:10 --end 00:00:15
 - `--font-ratio`: (Optional) The aspect ratio of the font used for rendering.
 - `--start`: (Optional) The start time for video conversion (e.g., `00:01:23.456` or `83.456`).
 - `--end`: (Optional) The end time for video conversion.
+- `--preprocess`: (Optional) ffmpeg `-vf` filtergraph applied before ASCII conversion (video and single-image inputs).
+- `--preprocess-preset`: (Optional) Built-in preprocessing preset (use `--list-preprocess-presets`).
+- `--list-preprocess-presets`: List built-in preprocessing presets and exit.
 - `--default`: Skips all prompts and uses default values for any missing arguments.
 - `-s`, `--small`: Uses smaller default values for quality settings.
 - `-l`, `--large`: Uses larger default values for quality settings.
@@ -184,6 +187,12 @@ cascii input.mp4 --to-video --colors --default --crf 28
 
 # Custom output path
 cascii input.mp4 --to-video --colors --default -o my_ascii_video.mp4
+
+# Contour-style preprocessing (raw ffmpeg filtergraph)
+cascii input.mp4 --default --preprocess "format=gray,edgedetect=mode=colormix:high=0.2:low=0.05,eq=contrast=2.5:brightness=-0.1"
+
+# Built-in preprocessing preset
+cascii input.mp4 --default --preprocess-preset contours
 
 # Specific time range with audio
 cascii input.mp4 --to-video --colors --audio --default --start 00:00:10 --end 00:00:20
@@ -326,6 +335,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         end: Some("10".to_string()),  // First 10 seconds
         columns: 400,
         extract_audio: false,
+        preprocess_filter: None,
     };
 
     // ASCII conversion options
@@ -392,6 +402,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         end: None,
         columns: 400,
         extract_audio: false,
+        preprocess_filter: None,
     };
 
     let conv_opts = ConversionOptions::default();
