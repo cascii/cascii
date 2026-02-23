@@ -75,6 +75,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command as ProcCommand, Stdio};
 use walkdir::WalkDir;
 
+pub mod preprocessing;
+
+use crate::preprocessing::build_frame_extraction_vf;
+
 /// Embedded monospace font for video rendering
 const FONT_DATA: &[u8] = include_bytes!("../resources/DejaVuSansMono.ttf");
 
@@ -301,19 +305,15 @@ impl ConversionResult {
     /// Write the conversion details to a details.toml file in the output directory
     pub fn write_details_file(&self) -> Result<PathBuf> {
         let details_path = self.output_dir.join("details.toml");
-        let toml_string = toml::to_string_pretty(&self.to_details())
-            .context("serializing details to TOML")?;
-
-        fs::write(&details_path, &toml_string)
-            .with_context(|| format!("writing details file to {}", details_path.display()))?;
+        let toml_string = toml::to_string_pretty(&self.to_details()).context("serializing details to TOML")?;
+        fs::write(&details_path, &toml_string).with_context(|| format!("writing details file to {}", details_path.display()))?;
 
         Ok(details_path)
     }
 
     /// Get the details as a TOML string (without writing to file)
     pub fn to_details_string(&self) -> String {
-        toml::to_string_pretty(&self.to_details())
-            .expect("failed to serialize details to TOML")
+        toml::to_string_pretty(&self.to_details()).expect("failed to serialize details to TOML")
     }
 }
 
@@ -461,6 +461,10 @@ pub struct VideoOptions {
     pub columns: u32,
     /// Whether to extract audio from the video
     pub extract_audio: bool,
+    /// Optional ffmpeg filtergraph applied before cascii's scale/fps extraction
+    ///
+    /// Example: `"format=gray,edgedetect=mode=colormix:high=0.2:low=0.05"`
+    pub preprocess_filter: Option<String>,
 }
 
 impl Default for VideoOptions {
@@ -471,6 +475,7 @@ impl Default for VideoOptions {
             end: None,
             columns: 400,
             extract_audio: false,
+            preprocess_filter: None,
         }
     }
 }
@@ -657,12 +662,18 @@ fn spawn_ffmpeg_encoder(
 
     let mut args: Vec<String> = vec![
         "-y".into(),
-        "-loglevel".into(), "error".into(),
-        "-f".into(), "rawvideo".into(),
-        "-pix_fmt".into(), "rgb24".into(),
-        "-s:v".into(), size,
-        "-r".into(), fps.to_string(),
-        "-i".into(), "pipe:0".into(),
+        "-loglevel".into(),
+        "error".into(),
+        "-f".into(),
+        "rawvideo".into(),
+        "-pix_fmt".into(),
+        "rgb24".into(),
+        "-s:v".into(),
+        size,
+        "-r".into(),
+        fps.to_string(),
+        "-i".into(),
+        "pipe:0".into(),
     ];
 
     if let Some(audio) = audio_path {
@@ -705,10 +716,7 @@ pub struct AsciiConverter {
 impl AsciiConverter {
     /// Create a new converter with default configuration
     pub fn new() -> Self {
-        Self {
-            config: AppConfig::default(),
-            ffmpeg_config: FfmpegConfig::default(),
-        }
+        Self {config: AppConfig::default(), ffmpeg_config: FfmpegConfig::default()}
     }
 
     /// Create a converter with custom configuration
@@ -717,7 +725,7 @@ impl AsciiConverter {
         if !config.ascii_chars.is_ascii() {
             return Err(anyhow!("Config contains non-ASCII characters in ascii_chars field. This will cause corrupted output. Please use only ASCII characters."));
         }
-        Ok(Self { config, ffmpeg_config: FfmpegConfig::default() })
+        Ok(Self {config, ffmpeg_config: FfmpegConfig::default()})
     }
 
     /// Set custom ffmpeg/ffprobe paths for this converter
@@ -750,7 +758,7 @@ impl AsciiConverter {
             ));
         }
 
-        Ok(Self { config, ffmpeg_config: FfmpegConfig::default() })
+        Ok(Self {config, ffmpeg_config: FfmpegConfig::default()})
     }
 
     /// Get the current configuration
@@ -866,7 +874,7 @@ impl AsciiConverter {
     /// use std::path::Path;
     ///
     /// let converter = AsciiConverter::new();
-    /// let video_opts = VideoOptions { fps: 24, start: None, end: None, columns: 120, extract_audio: false };
+    /// let video_opts = VideoOptions { fps: 24, start: None, end: None, columns: 120, extract_audio: false, preprocess_filter: None };
     /// let conv_opts = ConversionOptions::default();
     ///
     /// converter.convert_video_with_progress(
@@ -884,7 +892,7 @@ impl AsciiConverter {
         fs::create_dir_all(output_dir).context("creating output directory")?;
 
         // Extract frames with ffmpeg
-        extract_video_frames(input, output_dir, video_opts.columns, video_opts.fps, video_opts.start.as_deref(), video_opts.end.as_deref(), &self.ffmpeg_config)?;
+        extract_video_frames(input, output_dir, video_opts.columns, video_opts.fps, video_opts.start.as_deref(), video_opts.end.as_deref(), video_opts.preprocess_filter.as_deref(), &self.ffmpeg_config)?;
 
         // Extract audio if requested
         if video_opts.extract_audio {
@@ -973,7 +981,7 @@ impl AsciiConverter {
     ///     },
     /// ).unwrap();
     /// ```
-    pub fn convert_video_with_detailed_progress<F>(&self, input: &Path, output_dir: &Path, video_opts: &VideoOptions, conv_opts: &ConversionOptions, keep_images: bool, progress_callback: F) -> Result<ConversionResult> where F: Fn(Progress) + Send + Sync {
+    pub fn convert_video_with_detailed_progress<F>(&self, input: &Path, output_dir: &Path, video_opts: &VideoOptions,conv_opts: &ConversionOptions, keep_images: bool, progress_callback: F) -> Result<ConversionResult> where F: Fn(Progress) + Send + Sync {
         fs::create_dir_all(output_dir).context("creating output directory")?;
 
         // Phase 1: Extract frames from video with progress reporting
@@ -987,7 +995,7 @@ impl AsciiConverter {
 
         // Phase 3: Convert frames to ASCII with progress
         let ascii_chars = conv_opts.ascii_chars.as_bytes();
-        let total_frames = convert_directory_parallel_with_detailed_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, keep_images, ascii_chars, &conv_opts.output_mode, &progress_callback)?;
+        let total_frames = convert_directory_parallel_with_detailed_progress(output_dir,  output_dir, conv_opts.font_ratio, conv_opts.luminance, keep_images, ascii_chars, &conv_opts.output_mode, &progress_callback)?;
 
         // Phase 4: Complete
         progress_callback(Progress::complete(total_frames));
@@ -1088,30 +1096,13 @@ impl AsciiConverter {
     /// Extracts frames from the input video, converts each to ASCII art,
     /// renders the ASCII characters to pixel buffers, and pipes them to
     /// ffmpeg to produce an output MP4 video.
-    pub fn convert_video_to_video<F>(
-        &self,
-        input: &Path,
-        video_opts: &VideoOptions,
-        conv_opts: &ConversionOptions,
-        to_video_opts: &ToVideoOptions,
-        progress_callback: F,
-    ) -> Result<ConversionResult>
-    where
-        F: Fn(Progress) + Send + Sync,
-    {
+    pub fn convert_video_to_video<F>(&self, input: &Path, video_opts: &VideoOptions, conv_opts: &ConversionOptions, to_video_opts: &ToVideoOptions, progress_callback: F) -> Result<ConversionResult> where F: Fn(Progress) + Send + Sync {
         // Create temp directory for intermediate PNG frames
         let temp_dir = std::env::temp_dir().join(format!("cascii_tovideo_{}", std::process::id()));
         fs::create_dir_all(&temp_dir).context("creating temp directory")?;
 
         // Ensure cleanup on exit (both success and error paths)
-        let result = self.convert_video_to_video_inner(
-            input,
-            video_opts,
-            conv_opts,
-            to_video_opts,
-            &temp_dir,
-            &progress_callback,
-        );
+        let result = self.convert_video_to_video_inner(input, video_opts, conv_opts, to_video_opts, &temp_dir, &progress_callback);
 
         // Clean up temp directory
         let _ = fs::remove_dir_all(&temp_dir);
@@ -1119,18 +1110,7 @@ impl AsciiConverter {
         result
     }
 
-    fn convert_video_to_video_inner<F>(
-        &self,
-        input: &Path,
-        video_opts: &VideoOptions,
-        conv_opts: &ConversionOptions,
-        to_video_opts: &ToVideoOptions,
-        temp_dir: &Path,
-        progress_callback: &F,
-    ) -> Result<ConversionResult>
-    where
-        F: Fn(Progress) + Send + Sync,
-    {
+    fn convert_video_to_video_inner<F>(&self, input: &Path, video_opts: &VideoOptions, conv_opts: &ConversionOptions, to_video_opts: &ToVideoOptions, temp_dir: &Path, progress_callback: &F) -> Result<ConversionResult> where F: Fn(Progress) + Send + Sync {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
 
@@ -1179,21 +1159,19 @@ impl AsciiConverter {
         let mut pixel_w = first_w * atlas.cell_width;
         let mut pixel_h = first_h * atlas.cell_height;
         // H.264 requires even dimensions
-        if pixel_w % 2 != 0 { pixel_w += 1; }
-        if pixel_h % 2 != 0 { pixel_h += 1; }
+        if pixel_w % 2 != 0 {
+            pixel_w += 1;
+        }
+        if pixel_h % 2 != 0 {
+            pixel_h += 1;
+        }
 
         // Phase 5: Spawn ffmpeg encoder
-        let mut child = spawn_ffmpeg_encoder(
-            pixel_w,
-            pixel_h,
-            video_opts.fps,
-            to_video_opts.crf,
-            audio_path.as_deref(),
-            &to_video_opts.output_path,
-            &self.ffmpeg_config,
-        )?;
+        let mut child = spawn_ffmpeg_encoder(pixel_w, pixel_h, video_opts.fps, to_video_opts.crf, audio_path.as_deref(), &to_video_opts.output_path, &self.ffmpeg_config)?;
 
-        let mut stdin = child.stdin.take()
+        let mut stdin = child
+            .stdin
+            .take()
             .ok_or_else(|| anyhow!("failed to open ffmpeg stdin pipe"))?;
 
         let use_colors = conv_opts.output_mode != OutputMode::TextOnly;
@@ -1213,19 +1191,8 @@ impl AsciiConverter {
                 .par_iter()
                 .map(|path| {
                     let (ascii_text, width_chars, height_chars, rgb_colors) =
-                        image_to_ascii_with_colors(
-                            path,
-                            conv_opts.font_ratio,
-                            conv_opts.luminance,
-                            conv_opts.columns,
-                            ascii_chars,
-                        )?;
-                    Ok(AsciiFrameData {
-                        ascii_text,
-                        width_chars,
-                        height_chars,
-                        rgb_colors,
-                    })
+                        image_to_ascii_with_colors(path, conv_opts.font_ratio, conv_opts.luminance, conv_opts.columns, ascii_chars)?;
+                    Ok(AsciiFrameData {ascii_text, width_chars, height_chars, rgb_colors})
                 })
                 .collect::<Result<Vec<_>>>()?;
 
@@ -1241,8 +1208,16 @@ impl AsciiConverter {
                 }
 
                 let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
-                let current_percent = if total_frames > 0 { (current * 100) / total_frames } else { 0 };
-                let last_percent = if current > 1 { ((current - 1) * 100) / total_frames } else { 0 };
+                let current_percent = if total_frames > 0 {
+                    (current * 100) / total_frames
+                } else {
+                    0
+                };
+                let last_percent = if current > 1 {
+                    ((current - 1) * 100) / total_frames
+                } else {
+                    0
+                };
 
                 if current_percent > last_percent || current == total_frames {
                     progress_callback(Progress::rendering_video(current, total_frames));
@@ -1277,7 +1252,11 @@ impl AsciiConverter {
             fps: Some(video_opts.fps),
             output_mode: output_mode_str.to_string(),
             audio_extracted: to_video_opts.mux_audio,
-            output_dir: to_video_opts.output_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
+            output_dir: to_video_opts
+                .output_path
+                .parent()
+                .unwrap_or(Path::new("."))
+                .to_path_buf(),
             background_color: "black".to_string(),
             color: "white".to_string(),
         })
@@ -1287,16 +1266,7 @@ impl AsciiConverter {
     ///
     /// Scans the directory for .cframe files first; if none found, falls back to .txt files.
     /// Renders each frame using the glyph atlas and pipes to ffmpeg.
-    pub fn render_frames_to_video<F>(
-        &self,
-        input_dir: &Path,
-        fps: u32,
-        to_video_opts: &ToVideoOptions,
-        progress_callback: F,
-    ) -> Result<ConversionResult>
-    where
-        F: Fn(Progress) + Send + Sync,
-    {
+    pub fn render_frames_to_video<F>(&self, input_dir: &Path, fps: u32, to_video_opts: &ToVideoOptions, progress_callback: F) -> Result<ConversionResult> where F: Fn(Progress) + Send + Sync {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
 
@@ -1348,29 +1318,31 @@ impl AsciiConverter {
 
         let mut pixel_w = first_frame.width_chars * atlas.cell_width;
         let mut pixel_h = first_frame.height_chars * atlas.cell_height;
-        if !pixel_w.is_multiple_of(2) { pixel_w += 1; }
-        if !pixel_h.is_multiple_of(2) { pixel_h += 1; }
+        if !pixel_w.is_multiple_of(2) {
+            pixel_w += 1;
+        }
+        if !pixel_h.is_multiple_of(2) {
+            pixel_h += 1;
+        }
 
         // Check for audio.mp3 in the directory
         let audio_path = if to_video_opts.mux_audio {
             let ap = input_dir.join("audio.mp3");
-            if ap.exists() { Some(ap) } else { None }
+            if ap.exists() {
+                Some(ap)
+            } else {
+                None
+            }
         } else {
             None
         };
 
         // Spawn ffmpeg encoder
-        let mut child = spawn_ffmpeg_encoder(
-            pixel_w,
-            pixel_h,
-            fps,
-            to_video_opts.crf,
-            audio_path.as_deref(),
-            &to_video_opts.output_path,
-            &self.ffmpeg_config,
-        )?;
+        let mut child = spawn_ffmpeg_encoder(pixel_w, pixel_h, fps, to_video_opts.crf, audio_path.as_deref(), &to_video_opts.output_path, &self.ffmpeg_config)?;
 
-        let mut stdin = child.stdin.take()
+        let mut stdin = child
+            .stdin
+            .take()
             .ok_or_else(|| anyhow!("failed to open ffmpeg stdin pipe"))?;
 
         // Process frames in batches
@@ -1402,12 +1374,24 @@ impl AsciiConverter {
                     drop(stdin);
                     let output = child.wait_with_output().context("waiting for ffmpeg")?;
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    return Err(anyhow!("ffmpeg encoding failed: {} (stderr: {})", e, stderr));
+                    return Err(anyhow!(
+                        "ffmpeg encoding failed: {} (stderr: {})",
+                        e,
+                        stderr
+                    ));
                 }
 
                 let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
-                let current_percent = if total_frames > 0 { (current * 100) / total_frames } else { 0 };
-                let last_percent = if current > 1 { ((current - 1) * 100) / total_frames } else { 0 };
+                let current_percent = if total_frames > 0 {
+                    (current * 100) / total_frames
+                } else {
+                    0
+                };
+                let last_percent = if current > 1 {
+                    ((current - 1) * 100) / total_frames
+                } else {
+                    0
+                };
 
                 if current_percent > last_percent || current == total_frames {
                     progress_callback(Progress::rendering_video(current, total_frames));
@@ -1435,7 +1419,11 @@ impl AsciiConverter {
             fps: Some(fps),
             output_mode: mode_str.to_string(),
             audio_extracted: audio_path.is_some(),
-            output_dir: to_video_opts.output_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
+            output_dir: to_video_opts
+                .output_path
+                .parent()
+                .unwrap_or(Path::new("."))
+                .to_path_buf(),
             background_color: "black".to_string(),
             color: "white".to_string(),
         })
@@ -1452,8 +1440,10 @@ impl Default for AsciiConverter {
 fn convert_image_to_ascii(img_path: &Path, out_txt: &Path, font_ratio: f32, threshold: u8, columns: Option<u32>, ascii_chars: &[u8], output_mode: &OutputMode) -> Result<()> {
     match output_mode {
         OutputMode::TextOnly => {
-            let ascii_string = image_to_ascii_string(img_path, font_ratio, threshold, columns, ascii_chars)?;
-            fs::write(out_txt, ascii_string).with_context(|| format!("writing {}", out_txt.display()))?;
+            let ascii_string =
+                image_to_ascii_string(img_path, font_ratio, threshold, columns, ascii_chars)?;
+            fs::write(out_txt, ascii_string)
+                .with_context(|| format!("writing {}", out_txt.display()))?;
         }
         OutputMode::ColorOnly => {
             let (ascii_string, width, height, rgb_data) =
@@ -1462,8 +1452,10 @@ fn convert_image_to_ascii(img_path: &Path, out_txt: &Path, font_ratio: f32, thre
             write_cframe_binary(width, height, &ascii_string, &rgb_data, &cframe_path)?;
         }
         OutputMode::TextAndColor => {
-            let (ascii_string, width, height, rgb_data) = image_to_ascii_with_colors(img_path, font_ratio, threshold, columns, ascii_chars)?;
-            fs::write(out_txt, &ascii_string).with_context(|| format!("writing {}", out_txt.display()))?;
+            let (ascii_string, width, height, rgb_data) =
+                image_to_ascii_with_colors(img_path, font_ratio, threshold, columns, ascii_chars)?;
+            fs::write(out_txt, &ascii_string)
+                .with_context(|| format!("writing {}", out_txt.display()))?;
             let cframe_path = out_txt.with_extension("cframe");
             write_cframe_binary(width, height, &ascii_string, &rgb_data, &cframe_path)?;
         }
@@ -1556,15 +1548,23 @@ fn image_to_ascii_with_colors(img_path: &Path, font_ratio: f32, threshold: u8, c
 ///   char (u8) + r (u8) + g (u8) + b (u8)
 fn write_cframe_binary(width: u32, height: u32, ascii_content: &str, rgb_data: &[u8], path: &Path) -> Result<()> {
     use std::io::Write;
-    let mut file = fs::File::create(path).with_context(|| format!("creating cframe file {}", path.display()))?;
+    let mut file = fs::File::create(path)
+        .with_context(|| format!("creating cframe file {}", path.display()))?;
     file.write_all(&width.to_le_bytes())?;
     file.write_all(&height.to_le_bytes())?;
 
     let mut char_idx = 0;
     for ch in ascii_content.chars() {
-        if ch == '\n' { continue; }
+        if ch == '\n' {
+            continue;
+        }
         let rgb_offset = char_idx * 3;
-        file.write_all(&[ch as u8, rgb_data[rgb_offset], rgb_data[rgb_offset + 1], rgb_data[rgb_offset + 2]])?;
+        file.write_all(&[
+            ch as u8,
+            rgb_data[rgb_offset],
+            rgb_data[rgb_offset + 1],
+            rgb_data[rgb_offset + 2],
+        ])?;
         char_idx += 1;
     }
     Ok(())
@@ -1659,7 +1659,8 @@ fn char_for(luma: u8, threshold: u8, ascii_chars: &[u8]) -> char {
     ascii_chars[idx] as char
 }
 
-fn extract_video_frames(input: &Path, out_dir: &Path, columns: u32, fps: u32, start: Option<&str>, end: Option<&str>, ffmpeg_config: &FfmpegConfig) -> Result<()> {
+#[allow(clippy::too_many_arguments)]
+fn extract_video_frames(input: &Path, out_dir: &Path, columns: u32, fps: u32, start: Option<&str>, end: Option<&str>, preprocess_filter: Option<&str>, ffmpeg_config: &FfmpegConfig) -> Result<()> {
     let out_pattern = out_dir.join("frame_%04d.png");
     let mut ffmpeg_args: Vec<String> = vec!["-loglevel".into(), "error".into()];
 
@@ -1695,7 +1696,7 @@ fn extract_video_frames(input: &Path, out_dir: &Path, columns: u32, fps: u32, st
         }
     }
 
-    let vf_option = format!("scale={}:-2,fps={}", columns, fps);
+    let vf_option = build_frame_extraction_vf(columns, fps, preprocess_filter);
     ffmpeg_args.push("-vf".into());
     ffmpeg_args.push(vf_option);
     ffmpeg_args.push(out_pattern.to_str().unwrap().to_string());
@@ -1715,9 +1716,12 @@ fn extract_video_frames(input: &Path, out_dir: &Path, columns: u32, fps: u32, st
 fn get_video_duration_us(input: &Path, ffmpeg_config: &FfmpegConfig) -> Result<u64> {
     let output = ProcCommand::new(ffmpeg_config.ffprobe_cmd())
         .args([
-            "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
             input.to_str().unwrap(),
         ])
         .output()
@@ -1744,7 +1748,13 @@ fn extract_video_frames_with_progress<F>(input: &Path, out_dir: &Path, video_opt
     // Get video duration for progress calculation
     let _total_duration_us = get_video_duration_us(input, ffmpeg_config).unwrap_or(0);
 
-    let mut ffmpeg_args: Vec<String> = vec!["-loglevel".into(), "error".into(), "-progress".into(), "pipe:1".into(), "-nostats".into()];
+    let mut ffmpeg_args: Vec<String> = vec![
+        "-loglevel".into(),
+        "error".into(),
+        "-progress".into(),
+        "pipe:1".into(),
+        "-nostats".into(),
+    ];
 
     if let Some(s) = start {
         if !s.is_empty() && s != "0" {
@@ -1754,7 +1764,12 @@ fn extract_video_frames_with_progress<F>(input: &Path, out_dir: &Path, video_opt
     }
 
     ffmpeg_args.push("-i".into());
-    ffmpeg_args.push(input.to_str().ok_or_else(|| anyhow!("input path is not valid UTF-8"))?.to_string());
+    ffmpeg_args.push(
+        input
+            .to_str()
+            .ok_or_else(|| anyhow!("input path is not valid UTF-8"))?
+            .to_string(),
+    );
 
     if let Some(e) = end {
         if !e.is_empty() {
@@ -1778,7 +1793,7 @@ fn extract_video_frames_with_progress<F>(input: &Path, out_dir: &Path, video_opt
         }
     }
 
-    let vf_option = format!("scale={}:-2,fps={}", columns, fps);
+    let vf_option = build_frame_extraction_vf(columns, fps, video_opts.preprocess_filter.as_deref());
     ffmpeg_args.push("-vf".into());
     ffmpeg_args.push(vf_option);
     ffmpeg_args.push(out_pattern.to_str().ok_or_else(|| anyhow!("output path is not valid UTF-8"))?.to_string());
@@ -1889,7 +1904,7 @@ fn convert_directory_parallel_with_progress<F>(src_dir: &Path, dst_dir: &Path, f
             .and_then(|s| s.to_str())
             .ok_or_else(|| anyhow!("bad file name"))?;
         let out_txt = dst_dir.join(format!("{}.txt", file_stem));
-        convert_image_to_ascii(img_path, &out_txt, font_ratio, threshold, None, ascii_chars, output_mode)?;
+        convert_image_to_ascii(img_path, &out_txt, font_ratio, threshold, None, ascii_chars, output_mode,)?;
 
         // Update progress
         let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
@@ -1943,7 +1958,11 @@ fn convert_directory_parallel_with_detailed_progress<F>(src_dir: &Path, dst_dir:
 
         // Update progress - throttle to only report every 1% change
         let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
-        let current_percent = if total > 0 { (current * 100) / total } else { 0 };
+        let current_percent = if total > 0 {
+            (current * 100) / total
+        } else {
+            0
+        };
         let last_percent = last_reported_percent.load(Ordering::SeqCst);
 
         // Only report if percentage changed (throttle to ~100 updates max)

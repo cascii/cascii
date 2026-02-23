@@ -1,5 +1,9 @@
 use anyhow::{anyhow, Context, Result};
-use cascii::{AppConfig, AsciiConverter, ConversionOptions, OutputMode, Progress, ProgressPhase, ToVideoOptions, VideoOptions};
+use cascii::preprocessing::{preprocess_image_to_temp, resolve_preprocess_filter, PREPROCESS_PRESETS};
+use cascii::{
+    AppConfig, AsciiConverter, ConversionOptions, OutputMode, Progress, ProgressPhase,
+    ToVideoOptions, VideoOptions,
+};
 use clap::{Parser, Subcommand};
 use dialoguer::{Confirm, FuzzySelect, Input, Select};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -129,6 +133,18 @@ struct Args {
     #[arg(long)]
     end: Option<String>,
 
+    /// ffmpeg -vf filtergraph applied before ASCII conversion (video + single image inputs)
+    #[arg(long, alias = "preprocessing", conflicts_with = "preprocess_preset")]
+    preprocess: Option<String>,
+
+    /// Built-in preprocessing preset name (see --list-preprocess-presets)
+    #[arg(long, alias = "preprocessing-preset", conflicts_with = "preprocess")]
+    preprocess_preset: Option<String>,
+
+    /// List available preprocessing presets and exit
+    #[arg(long, default_value_t = false)]
+    list_preprocess_presets: bool,
+
     /// Find repeated loops in a frames directory (frame_*.txt)
     #[arg(long, default_value_t = false)]
     find_loop: bool,
@@ -154,6 +170,14 @@ struct Args {
     trim_bottom: Option<usize>,
 }
 
+fn print_preprocess_presets() {
+    println!("Available preprocessing presets:");
+    for preset in PREPROCESS_PRESETS {
+        println!("  {:<16} {}", preset.name, preset.description);
+        println!("      {}", preset.filter);
+    }
+}
+
 fn main() -> Result<()> {
     let mut args = Args::parse();
     let is_interactive = !(args.default || args.small || args.large);
@@ -164,6 +188,13 @@ fn main() -> Result<()> {
         println!("cascii uninstalled.");
         return Ok(());
     }
+
+    if args.list_preprocess_presets {
+        print_preprocess_presets();
+        return Ok(());
+    }
+
+    let preprocess_filter = resolve_preprocess_filter(args.preprocess.as_deref(), args.preprocess_preset.as_deref())?;
 
     // Handle trimming early and exit
     let any_trim = args.trim.unwrap_or(0) > 0
@@ -232,6 +263,12 @@ fn main() -> Result<()> {
             input_path.extension().and_then(|s| s.to_str()),
             Some("png" | "jpg" | "jpeg")
         );
+
+    if preprocess_filter.is_some() && input_path.is_dir() {
+        return Err(anyhow!(
+            "Preprocessing currently supports video files and single image files, not directory inputs"
+        ));
+    }
 
     // Compute output path for --to-video (video file) or normal mode (directory)
     let video_output_path = if args.to_video {
@@ -418,8 +455,15 @@ fn main() -> Result<()> {
     if input_path.is_file() {
         if is_image_input {
             println!("Converting image to ASCII...");
+            let preprocessed_image = if let Some(filter) = preprocess_filter.as_deref() {
+                println!("Applying preprocessing filter before ASCII conversion...");
+                Some(preprocess_image_to_temp(input_path, filter, converter.ffmpeg_config())?)
+            } else {
+                None
+            };
+            let image_input = preprocessed_image.as_ref().map_or(input_path.as_path(), |f| f.path());
             converter.convert_image(
-                input_path,
+                image_input,
                 &output_path.join(format!(
                     "{}.txt",
                     input_path.file_stem().unwrap().to_str().unwrap()
@@ -433,6 +477,7 @@ fn main() -> Result<()> {
                 end: args.end.clone(),
                 columns,
                 extract_audio: args.audio,
+                preprocess_filter: preprocess_filter.clone(),
             };
 
             let to_video_opts = ToVideoOptions {
@@ -527,6 +572,7 @@ fn main() -> Result<()> {
                 end: args.end.clone(),
                 columns,
                 extract_audio: args.audio,
+                preprocess_filter: preprocess_filter.clone(),
             };
 
             // Create progress bar for multi-phase progress
@@ -661,7 +707,11 @@ fn main() -> Result<()> {
             converter.convert_directory(input_path, &output_path, &conv_opts, args.keep_images)?;
 
             // For directory conversion, create details.toml manually since it doesn't go through video conversion
-            let frame_ext = if output_mode == OutputMode::ColorOnly { "cframe" } else { "txt" };
+            let frame_ext = if output_mode == OutputMode::ColorOnly {
+                "cframe"
+            } else {
+                "txt"
+            };
             let frame_count = WalkDir::new(&output_path)
                 .min_depth(1)
                 .max_depth(1)
@@ -689,7 +739,9 @@ fn main() -> Result<()> {
                 color: "white".to_string(),
             };
 
-            result.write_details_file().context("writing details file")?;
+            result
+                .write_details_file()
+                .context("writing details file")?;
             let details = result.to_details_string();
 
             if args.log_details {
