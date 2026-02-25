@@ -1,6 +1,6 @@
 [package]
 name = "cascii"
-version = "0.16.0"
+version = "0.16.1"
 edition = "2021"
 authors = ["cascii contributors"]
 description = "High-performance ASCII art generator for images and videos"
@@ -18,7 +18,6 @@ exclude = [
     "tests/",
     "resources/*.png",
     "resources/*.gif",
-    "resources/*.ttf",
     "example_*.txt",
 ]
 
