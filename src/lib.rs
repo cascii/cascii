@@ -75,6 +75,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command as ProcCommand, Stdio};
 use walkdir::WalkDir;
 
+pub mod crop;
 pub mod preprocessing;
 
 use crate::preprocessing::build_frame_extraction_vf;
@@ -521,15 +522,15 @@ struct GlyphAtlas {
 }
 
 /// Intermediate representation of one converted ASCII frame
-struct AsciiFrameData {
+pub(crate) struct AsciiFrameData {
     /// The ASCII text (with newlines between rows)
-    ascii_text: String,
+    pub(crate) ascii_text: String,
     /// Width in characters
-    width_chars: u32,
+    pub(crate) width_chars: u32,
     /// Height in characters (rows)
-    height_chars: u32,
+    pub(crate) height_chars: u32,
     /// Flat RGB color data, 3 bytes per character, row-major
-    rgb_colors: Vec<u8>,
+    pub(crate) rgb_colors: Vec<u8>,
 }
 
 fn build_glyph_atlas(font_size: f32) -> Result<GlyphAtlas> {
@@ -1546,7 +1547,7 @@ fn image_to_ascii_with_colors(img_path: &Path, font_ratio: f32, threshold: u8, c
 /// Header (8 bytes): width (u32 LE) + height (u32 LE)
 /// Body (width * height * 4 bytes): for each character position (row-major):
 ///   char (u8) + r (u8) + g (u8) + b (u8)
-fn write_cframe_binary(width: u32, height: u32, ascii_content: &str, rgb_data: &[u8], path: &Path) -> Result<()> {
+pub(crate) fn write_cframe_binary(width: u32, height: u32, ascii_content: &str, rgb_data: &[u8], path: &Path) -> Result<()> {
     use std::io::Write;
     let mut file = fs::File::create(path)
         .with_context(|| format!("creating cframe file {}", path.display()))?;
@@ -1571,7 +1572,7 @@ fn write_cframe_binary(width: u32, height: u32, ascii_content: &str, rgb_data: &
 }
 
 /// Read a .cframe binary file into AsciiFrameData
-fn read_cframe_to_frame_data(path: &Path) -> Result<AsciiFrameData> {
+pub(crate) fn read_cframe_to_frame_data(path: &Path) -> Result<AsciiFrameData> {
     let data = fs::read(path).with_context(|| format!("reading cframe {}", path.display()))?;
     if data.len() < 8 {
         return Err(anyhow!("cframe file too small: {}", path.display()));
@@ -1982,3 +1983,6 @@ fn convert_directory_parallel_with_detailed_progress<F>(src_dir: &Path, dst_dir:
 
     Ok(total)
 }
+
+// Re-export crop API for backwards compatibility
+pub use crop::{crop_frames, CropResult};
