@@ -1,15 +1,14 @@
 use anyhow::{anyhow, Context, Result};
-use cascii::preprocessing::{preprocess_image_to_temp, resolve_preprocess_filter, PREPROCESS_PRESETS};
+use cascii::loop_detect::run_find_loop;
+use cascii::preprocessing::{preprocess_directory, preprocess_image_to_temp, resolve_preprocess_filter, PREPROCESS_PRESETS};
 use cascii::{
-    AppConfig, AsciiConverter, ConversionOptions, OutputMode, Progress, ProgressPhase,
-    ToVideoOptions, VideoOptions,
+    crop_frames, run_trim, AppConfig, AsciiConverter, ConversionOptions, OutputMode, Progress,
+    ProgressPhase, ToVideoOptions, VideoOptions,
 };
 use clap::{Parser, Subcommand};
-use dialoguer::{Confirm, FuzzySelect, Input, Select};
+use dialoguer::{Confirm, FuzzySelect, Input};
 use indicatif::{ProgressBar, ProgressStyle};
-use std::collections::HashMap;
 use std::fs;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use walkdir::WalkDir;
@@ -141,6 +140,10 @@ struct Args {
     #[arg(long, alias = "preprocessing-preset", conflicts_with = "preprocess")]
     preprocess_preset: Option<String>,
 
+    /// Output directory for preprocessing: preprocess images here instead of using a temp file
+    #[arg(long)]
+    preprocess_output: Option<PathBuf>,
+
     /// List available preprocessing presets and exit
     #[arg(long, default_value_t = false)]
     list_preprocess_presets: bool,
@@ -168,6 +171,10 @@ struct Args {
     /// Trim rows from the bottom
     #[arg(long)]
     trim_bottom: Option<usize>,
+
+    /// Output directory for trim: copy frames here before cropping instead of trimming in-place
+    #[arg(long)]
+    trim_output: Option<PathBuf>,
 }
 
 fn print_preprocess_presets() {
@@ -212,11 +219,27 @@ fn main() -> Result<()> {
         let trim_right = args.trim_right.unwrap_or(base);
         let trim_top = args.trim_top.unwrap_or(base);
         let trim_bottom = args.trim_bottom.unwrap_or(base);
-        run_trim(&input_path, trim_left, trim_right, trim_top, trim_bottom)?;
-        println!(
-            "Trim completed: left={}, right={}, top={}, bottom={}",
-            trim_left, trim_right, trim_top, trim_bottom
-        );
+
+        if let Some(output_dir) = &args.trim_output {
+            if !input_path.is_dir() {
+                return Err(anyhow!("--trim-output requires the input to be a directory"));
+            }
+            let result = crop_frames(&input_path, trim_top, trim_bottom, trim_left, trim_right, output_dir)?;
+            println!(
+                "Trim completed: left={}, right={}, top={}, bottom={} → {} frames written to {} ({}×{})",
+                trim_left, trim_right, trim_top, trim_bottom,
+                result.frame_count,
+                output_dir.display(),
+                result.new_width,
+                result.new_height,
+            );
+        } else {
+            run_trim(&input_path, trim_left, trim_right, trim_top, trim_bottom)?;
+            println!(
+                "Trim completed: left={}, right={}, top={}, bottom={}",
+                trim_left, trim_right, trim_top, trim_bottom
+            );
+        }
         return Ok(());
     }
 
@@ -264,10 +287,25 @@ fn main() -> Result<()> {
             Some("png" | "jpg" | "jpeg")
         );
 
-    if preprocess_filter.is_some() && input_path.is_dir() {
+    if preprocess_filter.is_some() && input_path.is_dir() && args.preprocess_output.is_none() {
         return Err(anyhow!(
-            "Preprocessing currently supports video files and single image files, not directory inputs"
+            "Preprocessing a directory requires --preprocess-output to specify where preprocessed images are written"
         ));
+    }
+
+    // Handle directory preprocessing early and exit
+    if let Some(ref filter) = preprocess_filter {
+        if input_path.is_dir() {
+            let output_dir = args.preprocess_output.as_ref().unwrap();
+            let converter = AsciiConverter::with_config(load_config()?)?;
+            let count = preprocess_directory(input_path, filter, output_dir, converter.ffmpeg_config())?;
+            println!(
+                "Preprocessing completed: {} images written to {}",
+                count,
+                output_dir.display(),
+            );
+            return Ok(());
+        }
     }
 
     // Compute output path for --to-video (video file) or normal mode (directory)
@@ -820,305 +858,3 @@ fn run_uninstall(is_interactive: bool) -> Result<()> {
     Ok(())
 }
 
-fn run_trim(
-    path: &Path,
-    trim_left: usize,
-    trim_right: usize,
-    trim_top: usize,
-    trim_bottom: usize,
-) -> Result<()> {
-    if path.is_file() {
-        trim_file(path, trim_left, trim_right, trim_top, trim_bottom)?;
-    } else if path.is_dir() {
-        // Find all frame_*.txt recursively and process them
-        for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
-            let p = entry.path();
-            if p.is_file() {
-                if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
-                    if name.starts_with("frame_") && name.ends_with(".txt") {
-                        trim_file(p, trim_left, trim_right, trim_top, trim_bottom)?;
-                    }
-                }
-            }
-        }
-    } else {
-        return Err(anyhow!("Path does not exist: {}", path.display()));
-    }
-    Ok(())
-}
-
-fn trim_file(
-    path: &Path,
-    trim_left: usize,
-    trim_right: usize,
-    trim_top: usize,
-    trim_bottom: usize,
-) -> Result<()> {
-    let content =
-        fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-
-    if lines.is_empty() {
-        return Err(anyhow!("Cannot trim empty file: {}", path.display()));
-    }
-
-    let height = lines.len();
-    let width = lines[0].chars().count();
-
-    // Validate rectangular and strip potential trailing \r
-    for (idx, line) in lines.iter().enumerate() {
-        if line.chars().count() != width {
-            return Err(anyhow!(
-                "Non-rectangular frame at {} line {}",
-                path.display(),
-                idx + 1
-            ));
-        }
-    }
-
-    if trim_top + trim_bottom >= height {
-        return Err(anyhow!(
-            "Trim rows exceed or equal file height ({} >= {}) for {}",
-            trim_top + trim_bottom,
-            height,
-            path.display()
-        ));
-    }
-    if trim_left + trim_right >= width {
-        return Err(anyhow!(
-            "Trim columns exceed or equal file width ({} >= {}) for {}",
-            trim_left + trim_right,
-            width,
-            path.display()
-        ));
-    }
-
-    // Apply vertical trims
-    let start_row = trim_top;
-    let end_row_exclusive = height - trim_bottom;
-    let mut trimmed: Vec<String> = Vec::with_capacity(end_row_exclusive - start_row);
-
-    for line in lines.iter().take(end_row_exclusive).skip(start_row) {
-        // Apply horizontal trims using char indices (to handle unicode safely)
-        let left = trim_left;
-        let right = trim_right;
-        let take_len = width - left - right;
-        let slice: String = line.chars().skip(left).take(take_len).collect();
-        trimmed.push(slice);
-    }
-
-    let new_content = trimmed.join("\n") + "\n";
-    fs::write(path, new_content).with_context(|| format!("writing {}", path.display()))?;
-    Ok(())
-}
-
-fn run_find_loop(dir: &Path) -> Result<()> {
-    // Load frames in order
-    let mut frames: Vec<(usize, String)> = Vec::new();
-    let mut entries: Vec<PathBuf> = WalkDir::new(dir)
-        .min_depth(1)
-        .max_depth(1)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .map(|e| e.into_path())
-        .filter(|p| p.extension().map(|e| e == "txt").unwrap_or(false))
-        .collect();
-    entries.sort();
-
-    for p in entries {
-        let name = p
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_string();
-        if !name.starts_with("frame_") {
-            continue;
-        }
-        // parse frame number
-        let num = name
-            .trim_start_matches("frame_")
-            .trim_end_matches(".txt")
-            .parse::<usize>()
-            .unwrap_or(frames.len());
-        let content = fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))?;
-        frames.push((num, content));
-    }
-    if frames.is_empty() {
-        return Err(anyhow!("No frame_*.txt files found in {}", dir.display()));
-    }
-    frames.sort_by_key(|(n, _)| *n);
-
-    // Hash frames and map to indices
-    use std::collections::hash_map::DefaultHasher;
-    let mut hash_to_indices: HashMap<u64, Vec<usize>> = HashMap::new();
-    let mut repeated_hashes: Vec<u64> = Vec::new();
-
-    for (idx, (_, content)) in frames.iter().enumerate() {
-        let mut hasher = DefaultHasher::new();
-        content.hash(&mut hasher);
-        let h = hasher.finish();
-        let entry = hash_to_indices.entry(h).or_default();
-        entry.push(idx);
-        if entry.len() == 2 {
-            // first time we see a repeat
-            repeated_hashes.push(h);
-        }
-    }
-
-    if repeated_hashes.is_empty() {
-        println!("No repeated frames detected.");
-        return Ok(());
-    }
-
-    // Build candidate loops: for each repeated hash, all non-adjacent pairs between occurrences
-    // Ignore immediate number neighbors (e.g., frame N and frame N+1)
-    let mut loops: Vec<(usize, usize)> = Vec::new();
-    for h in &repeated_hashes {
-        if let Some(indices) = hash_to_indices.get(h) {
-            let n = indices.len();
-            for a in 0..n.saturating_sub(1) {
-                for b in (a + 1)..n {
-                    let s = indices[a];
-                    let e = indices[b];
-                    let fn_start = frames[s].0;
-                    let fn_end = frames[e].0;
-                    if fn_end > fn_start + 1 {
-                        // exclude immediate neighbors
-                        loops.push((s, e));
-                    }
-                }
-            }
-        }
-    }
-    // Deduplicate loops
-    loops.sort();
-    loops.dedup();
-
-    if loops.is_empty() {
-        println!("No loopable segments detected.");
-        return Ok(());
-    }
-
-    println!("Found loops:");
-    for (i, (s, e)) in loops.iter().enumerate() {
-        println!(
-            "{}: frames {}..{} (inclusive start, exclusive end)",
-            i + 1,
-            frames[*s].0,
-            frames[*e].0
-        );
-    }
-
-    // Interactive menu
-    loop {
-        let choices = vec!["Export loop", "Repeat loop", "Quit"];
-        let sel = Select::new()
-            .with_prompt("Choose an action")
-            .default(0)
-            .items(&choices)
-            .interact()?;
-        match sel {
-            0 => {
-                // Export
-                let labels: Vec<String> = loops
-                    .iter()
-                    .map(|(s, e)| format!("{}..{}", frames[*s].0, frames[*e].0))
-                    .collect();
-                let idx = Select::new()
-                    .with_prompt("Select loop to export")
-                    .default(0)
-                    .items(&labels)
-                    .interact()?;
-                let (s, e) = loops[idx];
-                export_loop(dir, &frames, s, e)?;
-                println!("Exported loop {}..{}", frames[s].0, frames[e].0);
-            }
-            1 => {
-                // Repeat
-                let labels: Vec<String> = loops
-                    .iter()
-                    .map(|(s, e)| format!("{}..{}", frames[*s].0, frames[*e].0))
-                    .collect();
-                let idx = Select::new()
-                    .with_prompt("Select loop to repeat")
-                    .default(0)
-                    .items(&labels)
-                    .interact()?;
-                let (s, e) = loops[idx];
-                repeat_loop(dir, &frames, s, e)?;
-                println!("Loop repeated");
-            }
-            _ => break,
-        }
-    }
-
-    Ok(())
-}
-
-fn export_loop(
-    dir: &Path,
-    frames: &[(usize, String)],
-    start_idx: usize,
-    end_idx: usize,
-) -> Result<()> {
-    let start_frame = frames[start_idx].0;
-    let end_frame = frames[end_idx].0;
-    let out = dir.with_file_name(format!(
-        "{}_loop_{}_{}",
-        dir.file_name().and_then(|s| s.to_str()).unwrap_or("frames"),
-        start_frame,
-        end_frame
-    ));
-    fs::create_dir_all(&out)?;
-    let mut counter: usize = 1;
-    for frame in frames.iter().take(end_idx + 1).skip(start_idx) {
-        // inclusive both ends as per example ABCD A
-        let filename = out.join(format!("frame_{:04}.txt", counter));
-        fs::write(filename, &frame.1)?;
-        counter += 1;
-    }
-    Ok(())
-}
-
-fn repeat_loop(
-    dir: &Path,
-    frames: &[(usize, String)],
-    start_idx: usize,
-    end_idx: usize,
-) -> Result<()> {
-    // Reinsert the selected loop immediately after the end index
-    // We will renumber and rewrite all frames to the same directory
-    let mut new_seq: Vec<String> = Vec::with_capacity(frames.len() + (end_idx - start_idx + 1));
-    for (_, content) in frames.iter().take(end_idx + 1) {
-        new_seq.push(content.clone());
-    }
-    for frame in frames.iter().take(end_idx + 1).skip(start_idx) {
-        new_seq.push(frame.1.clone());
-    }
-    for (_, content) in frames.iter().skip(end_idx + 1) {
-        new_seq.push(content.clone());
-    }
-
-    // Write back with new numbering
-    // First, remove existing frame_*.txt
-    for entry in WalkDir::new(dir)
-        .min_depth(1)
-        .max_depth(1)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let p = entry.path().to_path_buf();
-        if p.is_file() {
-            if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
-                if name.starts_with("frame_") && name.ends_with(".txt") {
-                    let _ = fs::remove_file(p);
-                }
-            }
-        }
-    }
-    for (i, content) in new_seq.iter().enumerate() {
-        let filename = dir.join(format!("frame_{:04}.txt", i + 1));
-        fs::write(filename, content)?;
-    }
-    Ok(())
-}

@@ -2,7 +2,9 @@ use anyhow::{anyhow, Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::{read_cframe_to_frame_data, write_cframe_binary};
+use walkdir::WalkDir;
+
+use crate::convert::{read_cframe_to_frame_data, write_cframe_binary};
 
 /// Result of a crop operation
 #[derive(Debug)]
@@ -123,4 +125,85 @@ pub fn crop_frames(source_dir: &Path, top: usize, bottom: usize, left: usize, ri
     }
 
     Ok(CropResult {frame_count: txt_frames.len(), new_width, new_height, total_size})
+}
+
+/// Trim frames in-place. If `path` is a file, trims that single file.
+/// If `path` is a directory, trims all `frame_*.txt` files inside it.
+pub fn run_trim(path: &Path, trim_left: usize, trim_right: usize, trim_top: usize, trim_bottom: usize) -> Result<()> {
+    if path.is_file() {
+        trim_file(path, trim_left, trim_right, trim_top, trim_bottom)?;
+    } else if path.is_dir() {
+        // Find all frame_*.txt recursively and process them
+        for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+            let p = entry.path();
+            if p.is_file() {
+                if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
+                    if name.starts_with("frame_") && name.ends_with(".txt") {
+                        trim_file(p, trim_left, trim_right, trim_top, trim_bottom)?;
+                    }
+                }
+            }
+        }
+    } else {
+        return Err(anyhow!("Path does not exist: {}", path.display()));
+    }
+    Ok(())
+}
+
+fn trim_file(path: &Path, trim_left: usize, trim_right: usize, trim_top: usize, trim_bottom: usize) -> Result<()> {
+    let content = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+
+    if lines.is_empty() {
+        return Err(anyhow!("Cannot trim empty file: {}", path.display()));
+    }
+
+    let height = lines.len();
+    let width = lines[0].chars().count();
+
+    // Validate rectangular and strip potential trailing \r
+    for (idx, line) in lines.iter().enumerate() {
+        if line.chars().count() != width {
+            return Err(anyhow!(
+                "Non-rectangular frame at {} line {}",
+                path.display(),
+                idx + 1
+            ));
+        }
+    }
+
+    if trim_top + trim_bottom >= height {
+        return Err(anyhow!(
+            "Trim rows exceed or equal file height ({} >= {}) for {}",
+            trim_top + trim_bottom,
+            height,
+            path.display()
+        ));
+    }
+    if trim_left + trim_right >= width {
+        return Err(anyhow!(
+            "Trim columns exceed or equal file width ({} >= {}) for {}",
+            trim_left + trim_right,
+            width,
+            path.display()
+        ));
+    }
+
+    // Apply vertical trims
+    let start_row = trim_top;
+    let end_row_exclusive = height - trim_bottom;
+    let mut trimmed: Vec<String> = Vec::with_capacity(end_row_exclusive - start_row);
+
+    for line in lines.iter().take(end_row_exclusive).skip(start_row) {
+        // Apply horizontal trims using char indices (to handle unicode safely)
+        let left = trim_left;
+        let right = trim_right;
+        let take_len = width - left - right;
+        let slice: String = line.chars().skip(left).take(take_len).collect();
+        trimmed.push(slice);
+    }
+
+    let new_content = trimmed.join("\n") + "\n";
+    fs::write(path, new_content).with_context(|| format!("writing {}", path.display()))?;
+    Ok(())
 }

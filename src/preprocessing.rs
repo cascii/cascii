@@ -117,6 +117,64 @@ impl Drop for TempFileGuard {
     }
 }
 
+/// Preprocess all images in a directory, writing results to an output directory.
+///
+/// Each image file (`.png`, `.jpg`, `.jpeg`) is processed through the given
+/// ffmpeg filter and written to `output_dir` as a `.png` file, preserving the
+/// original file stem.
+pub fn preprocess_directory(source_dir: &Path, filter: &str, output_dir: &Path, ffmpeg_config: &FfmpegConfig) -> Result<usize> {
+    if !source_dir.exists() {
+        return Err(anyhow!("Source directory does not exist: {}", source_dir.display()));
+    }
+
+    fs::create_dir_all(output_dir).with_context(|| format!("creating output directory {}", output_dir.display()))?;
+
+    let mut images: Vec<PathBuf> = Vec::new();
+    for entry in fs::read_dir(source_dir)
+        .with_context(|| format!("reading directory {}", source_dir.display()))?
+        .flatten()
+    {
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                if matches!(ext, "png" | "jpg" | "jpeg") {
+                    images.push(path);
+                }
+            }
+        }
+    }
+    images.sort();
+
+    if images.is_empty() {
+        return Err(anyhow!("No image files found in {}", source_dir.display()));
+    }
+
+    for img_path in &images {
+        let stem = img_path.file_stem().and_then(|s| s.to_str()).unwrap_or("frame");
+        let out_path = output_dir.join(format!("{}.png", stem));
+
+        let status = ProcCommand::new(ffmpeg_config.ffmpeg_cmd())
+            .arg("-loglevel")
+            .arg("error")
+            .arg("-y")
+            .arg("-i")
+            .arg(img_path)
+            .arg("-vf")
+            .arg(filter)
+            .arg("-frames:v")
+            .arg("1")
+            .arg(&out_path)
+            .status()
+            .with_context(|| format!("running ffmpeg preprocessing on {}", img_path.display()))?;
+
+        if !status.success() {
+            return Err(anyhow!("ffmpeg preprocessing failed for {}", img_path.display()));
+        }
+    }
+
+    Ok(images.len())
+}
+
 pub fn preprocess_image_to_temp(input: &Path, filter: &str, ffmpeg_config: &FfmpegConfig) -> Result<TempFileGuard> {
     let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
     let out_path = std::env::temp_dir().join(format!("cascii_preprocessed_{}_{}.png", std::process::id(), stamp));
