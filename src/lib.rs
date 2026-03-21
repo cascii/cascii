@@ -487,6 +487,9 @@ pub struct ToVideoOptions {
     pub crf: u8,
     /// Whether to mux audio from the source video into the output
     pub mux_audio: bool,
+    /// Override color rendering: `Some(true)` forces per-character colors from .cframe data,
+    /// `Some(false)` forces monochrome white-on-black, `None` auto-detects from file types.
+    pub use_colors: Option<bool>,
 }
 
 impl Default for ToVideoOptions {
@@ -496,6 +499,7 @@ impl Default for ToVideoOptions {
             font_size: 14.0,
             crf: 18,
             mux_audio: false,
+            use_colors: None,
         }
     }
 }
@@ -698,9 +702,9 @@ impl AsciiConverter {
 
         // Build result with conversion details
         let output_mode_str = match conv_opts.output_mode {
-            OutputMode::TextOnly => "text-only",
-            OutputMode::ColorOnly => "color-only",
-            OutputMode::TextAndColor => "text+color",
+            OutputMode::TextOnly        => "text-only",
+            OutputMode::ColorOnly       => "color-only",
+            OutputMode::TextAndColor    => "text+color",
         };
 
         let result = ConversionResult {
@@ -940,15 +944,8 @@ impl AsciiConverter {
 
         // Phase 4: Convert first frame to determine output resolution
         let ascii_chars = conv_opts.ascii_chars.as_bytes();
-        let (first_ascii, first_w, first_h, _) = convert::image_to_ascii_with_colors(
-            &png_paths[0],
-            conv_opts.font_ratio,
-            conv_opts.luminance,
-            conv_opts.columns,
-            ascii_chars,
-        )?;
+        let (first_ascii, first_w, first_h, _) = convert::image_to_ascii_with_colors(&png_paths[0], conv_opts.font_ratio, conv_opts.luminance, conv_opts.columns, ascii_chars)?;
         let _ = first_ascii; // we only need dimensions
-
         let mut pixel_w = first_w * atlas.cell_width;
         let mut pixel_h = first_h * atlas.cell_height;
         // H.264 requires even dimensions
@@ -961,12 +958,7 @@ impl AsciiConverter {
 
         // Phase 5: Spawn ffmpeg encoder
         let mut child = render::spawn_ffmpeg_encoder(pixel_w, pixel_h, video_opts.fps, to_video_opts.crf, audio_path.as_deref(), &to_video_opts.output_path, &self.ffmpeg_config)?;
-
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| anyhow!("failed to open ffmpeg stdin pipe"))?;
-
+        let mut stdin = child.stdin.take().ok_or_else(|| anyhow!("failed to open ffmpeg stdin pipe"))?;
         let use_colors = conv_opts.output_mode != OutputMode::TextOnly;
 
         // Phase 6: Process frames in batches
@@ -983,8 +975,7 @@ impl AsciiConverter {
             let frame_data: Vec<convert::AsciiFrameData> = batch
                 .par_iter()
                 .map(|path| {
-                    let (ascii_text, width_chars, height_chars, rgb_colors) =
-                        convert::image_to_ascii_with_colors(path, conv_opts.font_ratio, conv_opts.luminance, conv_opts.columns, ascii_chars)?;
+                    let (ascii_text, width_chars, height_chars, rgb_colors) = convert::image_to_ascii_with_colors(path, conv_opts.font_ratio, conv_opts.luminance, conv_opts.columns, ascii_chars)?;
                     Ok(convert::AsciiFrameData {ascii_text, width_chars, height_chars, rgb_colors})
                 })
                 .collect::<Result<Vec<_>>>()?;
@@ -1030,11 +1021,10 @@ impl AsciiConverter {
 
         // Phase 7: Complete
         progress_callback(Progress::complete(total_frames));
-
         let output_mode_str = match conv_opts.output_mode {
-            OutputMode::TextOnly => "text-only",
-            OutputMode::ColorOnly => "color-only",
-            OutputMode::TextAndColor => "text+color",
+            OutputMode::TextOnly        => "text-only",
+            OutputMode::ColorOnly       => "color-only",
+            OutputMode::TextAndColor    => "text+color",
         };
 
         Ok(ConversionResult {
@@ -1045,11 +1035,7 @@ impl AsciiConverter {
             fps: Some(video_opts.fps),
             output_mode: output_mode_str.to_string(),
             audio_extracted: to_video_opts.mux_audio,
-            output_dir: to_video_opts
-                .output_path
-                .parent()
-                .unwrap_or(Path::new("."))
-                .to_path_buf(),
+            output_dir: to_video_opts.output_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
             background_color: "black".to_string(),
             color: "white".to_string(),
         })
@@ -1132,16 +1118,12 @@ impl AsciiConverter {
 
         // Spawn ffmpeg encoder
         let mut child = render::spawn_ffmpeg_encoder(pixel_w, pixel_h, fps, to_video_opts.crf, audio_path.as_deref(), &to_video_opts.output_path, &self.ffmpeg_config)?;
-
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| anyhow!("failed to open ffmpeg stdin pipe"))?;
+        let mut stdin = child.stdin.take().ok_or_else(|| anyhow!("failed to open ffmpeg stdin pipe"))?;
 
         // Process frames in batches
         let batch_size = 100;
         let completed = Arc::new(AtomicUsize::new(0));
-
+        let render_with_colors = to_video_opts.use_colors.unwrap_or(use_cframes);
         progress_callback(Progress::rendering_video(0, total_frames));
 
         for batch_start in (0..total_frames).step_by(batch_size) {
@@ -1162,16 +1144,12 @@ impl AsciiConverter {
 
             // Render and pipe sequentially
             for frame in &frame_data {
-                let rgb_buf = render::render_ascii_frame_to_rgb(frame, &atlas, use_cframes);
+                let rgb_buf = render::render_ascii_frame_to_rgb(frame, &atlas, render_with_colors);
                 if let Err(e) = stdin.write_all(&rgb_buf) {
                     drop(stdin);
                     let output = child.wait_with_output().context("waiting for ffmpeg")?;
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    return Err(anyhow!(
-                        "ffmpeg encoding failed: {} (stderr: {})",
-                        e,
-                        stderr
-                    ));
+                    return Err(anyhow!("ffmpeg encoding failed: {} (stderr: {})", e, stderr));
                 }
 
                 let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
@@ -1212,11 +1190,7 @@ impl AsciiConverter {
             fps: Some(fps),
             output_mode: mode_str.to_string(),
             audio_extracted: audio_path.is_some(),
-            output_dir: to_video_opts
-                .output_path
-                .parent()
-                .unwrap_or(Path::new("."))
-                .to_path_buf(),
+            output_dir: to_video_opts.output_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
             background_color: "black".to_string(),
             color: "white".to_string(),
         })

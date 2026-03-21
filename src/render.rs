@@ -186,6 +186,8 @@ pub(crate) fn spawn_ffmpeg_encoder(
     args.push(crf.to_string());
     args.push("-preset".into());
     args.push("medium".into());
+    args.push("-g".into());
+    args.push(fps.to_string());
     args.push("-pix_fmt".into());
     args.push("yuv420p".into());
     args.push(output_path.to_str().ok_or_else(|| anyhow!("output path is not valid UTF-8"))?.to_string());
