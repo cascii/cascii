@@ -41,3 +41,6 @@ target
 /tests/video/output/default/**/*.txt
 /tests/video/output/small/**/*.txt
 /tests/video/output/large/**/*.txt
+
+.ssmver/
+.docs/
