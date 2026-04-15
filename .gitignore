@@ -22,5 +22,5 @@ target
 
 .DS_Store
 
-.docs
-
+.docs/
+.ssmver/
