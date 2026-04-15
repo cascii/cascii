@@ -21,23 +21,6 @@ target
 #.idea/
 
 .DS_Store
-/tests/video/output/**/*.png
-/tests/video/output/default/frame_images/*.txt
-/tests/video/output/small/frame_images/*.txt
-/tests/video/output/large/frame_images/*.txt
 
-/tests/video/output/**/*.png
-/tests/video/output/default/frame_images/*.txt
-/tests/video/output/small/frame_images/*.txt
-/tests/video/output/large/frame_images/*.txt
-/tests/video/output/large/frame_images/*.txt
-/tests/video/output/small/*.md
-/tests/video/output/default/*.md
-/tests/video/output/large/*.md
-/tests/video/output/default/test/*.txt
+.docs
 
-/tests/video/output/expected/**/*.txt
-
-/tests/video/output/default/**/*.txt
-/tests/video/output/small/**/*.txt
-/tests/video/output/large/**/*.txt

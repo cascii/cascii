@@ -96,6 +96,7 @@ cascii my_video.mp4 --start 00:00:10 --end 00:00:15
 - `--end`: (Optional) The end time for video conversion.
 - `--preprocess`: (Optional) ffmpeg `-vf` filtergraph applied before ASCII conversion (video and single-image inputs).
 - `--preprocess-preset`: (Optional) Built-in preprocessing preset (use `--list-preprocess-presets`).
+- `--preprocess-output`: Run preprocessing as a standalone step, write the processed image/video here, and exit. For single-file inputs this can be a file path or a directory. For directories of images it must be a directory.
 - `--list-preprocess-presets`: List built-in preprocessing presets and exit.
 - `--default`: Skips all prompts and uses default values for any missing arguments.
 - `-s`, `--small`: Uses smaller default values for quality settings.
@@ -187,6 +188,12 @@ cascii input.mp4 --to-video --colors --default --crf 28
 
 # Custom output path
 cascii input.mp4 --to-video --colors --default -o my_ascii_video.mp4
+
+# Standalone preprocessing: remove a white background from a single image
+cascii portrait.png --preprocess-preset bg-white --preprocess-output ./preprocessed
+
+# Standalone preprocessing: write a keyed video and exit
+cascii input.mp4 --preprocess-preset bg-black --preprocess-output ./preprocessed.mp4 --default
 
 # Contour-style preprocessing (raw ffmpeg filtergraph)
 cascii input.mp4 --default --preprocess "format=gray,edgedetect=mode=colormix:high=0.2:low=0.05,eq=contrast=2.5:brightness=-0.1"
