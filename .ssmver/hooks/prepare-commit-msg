@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+SSMVER_BIN='/Users/hjoncour/.cargo/bin/ssmver'
+
+if [ -x "$SSMVER_BIN" ]; then
+  exec "$SSMVER_BIN" hook prepare-commit-msg "$@"
+fi
+
+if command -v ssmver >/dev/null 2>&1; then
+  exec "$(command -v ssmver)" hook prepare-commit-msg "$@"
+fi
+
+echo "ssmver binary not found; rerun 'ssmver init' or install ssmver" >&2
+exit 1
