@@ -29,8 +29,7 @@ pub(crate) struct GlyphAtlas {
 pub(crate) fn build_glyph_atlas(font_size: f32) -> Result<GlyphAtlas> {
     use ab_glyph::Font;
 
-    let font = FontRef::try_from_slice(FONT_DATA)
-        .map_err(|e| anyhow!("failed to load embedded font: {}", e))?;
+    let font = FontRef::try_from_slice(FONT_DATA).map_err(|e| anyhow!("failed to load embedded font: {}", e))?;
 
     let scale = PxScale::from(font_size);
     let scaled_font = font.as_scaled(scale);
@@ -64,18 +63,10 @@ pub(crate) fn build_glyph_atlas(font_size: f32) -> Result<GlyphAtlas> {
         glyphs.insert(byte, GlyphBitmap { alpha });
     }
 
-    Ok(GlyphAtlas {
-        glyphs,
-        cell_width,
-        cell_height,
-    })
+    Ok(GlyphAtlas {glyphs, cell_width, cell_height})
 }
 
-pub(crate) fn render_ascii_frame_to_rgb(
-    frame: &AsciiFrameData,
-    atlas: &GlyphAtlas,
-    use_colors: bool,
-) -> Vec<u8> {
+pub(crate) fn render_ascii_frame_to_rgb(frame: &AsciiFrameData, atlas: &GlyphAtlas, use_colors: bool) -> Vec<u8> {
     let mut pixel_w = frame.width_chars * atlas.cell_width;
     let mut pixel_h = frame.height_chars * atlas.cell_height;
 
@@ -104,11 +95,7 @@ pub(crate) fn render_ascii_frame_to_rgb(
 
         // Get color for this character
         let (r, g, b) = if use_colors && char_idx * 3 + 2 < frame.rgb_colors.len() {
-            (
-                frame.rgb_colors[char_idx * 3],
-                frame.rgb_colors[char_idx * 3 + 1],
-                frame.rgb_colors[char_idx * 3 + 2],
-            )
+            (frame.rgb_colors[char_idx * 3], frame.rgb_colors[char_idx * 3 + 1], frame.rgb_colors[char_idx * 3 + 2])
         } else {
             (255, 255, 255) // white for text-only mode
         };
@@ -143,32 +130,10 @@ pub(crate) fn render_ascii_frame_to_rgb(
     buffer
 }
 
-pub(crate) fn spawn_ffmpeg_encoder(
-    pixel_width: u32,
-    pixel_height: u32,
-    fps: u32,
-    crf: u8,
-    audio_path: Option<&Path>,
-    output_path: &Path,
-    ffmpeg_config: &FfmpegConfig,
-) -> Result<std::process::Child> {
+pub(crate) fn spawn_ffmpeg_encoder(pixel_width: u32, pixel_height: u32, fps: u32, crf: u8, audio_path: Option<&Path>, output_path: &Path, ffmpeg_config: &FfmpegConfig) -> Result<std::process::Child> {
     let size = format!("{}x{}", pixel_width, pixel_height);
 
-    let mut args: Vec<String> = vec![
-        "-y".into(),
-        "-loglevel".into(),
-        "error".into(),
-        "-f".into(),
-        "rawvideo".into(),
-        "-pix_fmt".into(),
-        "rgb24".into(),
-        "-s:v".into(),
-        size,
-        "-r".into(),
-        fps.to_string(),
-        "-i".into(),
-        "pipe:0".into(),
-    ];
+    let mut args: Vec<String> = vec!["-y".into(), "-loglevel".into(), "error".into(), "-f".into(), "rawvideo".into(), "-pix_fmt".into(), "rgb24".into(), "-s:v".into(), size, "-r".into(), fps.to_string(), "-i".into(), "pipe:0".into()];
 
     if let Some(audio) = audio_path {
         args.push("-i".into());
@@ -192,13 +157,6 @@ pub(crate) fn spawn_ffmpeg_encoder(
     args.push("yuv420p".into());
     args.push(output_path.to_str().ok_or_else(|| anyhow!("output path is not valid UTF-8"))?.to_string());
 
-    let child = ProcCommand::new(ffmpeg_config.ffmpeg_cmd())
-        .args(&args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("spawning ffmpeg encoder")?;
-
+    let child = ProcCommand::new(ffmpeg_config.ffmpeg_cmd()).args(&args).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped()).spawn().context("spawning ffmpeg encoder")?;
     Ok(child)
 }
