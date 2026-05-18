@@ -6,7 +6,7 @@ use cascii::preprocessing::{
     resolve_preprocess_output_path, PreprocessInputKind, PREPROCESS_PRESETS,
 };
 use cascii::{
-    crop_frames, run_trim, AppConfig, AsciiConverter, ConversionOptions, OutputMode, Progress,
+    crop_frames, run_trim, AppConfig, AsciiConverter, CellColorMode, ConversionOptions, OutputMode, Progress,
     ProgressPhase, ToVideoOptions, VideoOptions,
 };
 use clap::{Parser, Subcommand};
@@ -29,8 +29,7 @@ fn load_config() -> Result<AppConfig> {
 
     for p in &tried {
         if p.exists() {
-            let text =
-                fs::read_to_string(p).with_context(|| format!("reading config {}", p.display()))?;
+            let text = fs::read_to_string(p).with_context(|| format!("reading config {}", p.display()))?;
             let cfg: AppConfig = serde_json::from_str(&text).context("parsing config json")?;
 
             // Validate that ascii_chars contains only ASCII characters
@@ -123,6 +122,10 @@ struct Args {
     /// CRF quality for --to-video encoding (0-51, lower = better, 18 = visually lossless)
     #[arg(long, default_value_t = 18)]
     crf: u8,
+
+    /// Experimental option C: fit per-cell foreground/background colors for direct video rendering
+    #[arg(long, default_value_t = false)]
+    fit_cell_backgrounds: bool,
 
     /// Extract audio from video to audio.mp3
     #[arg(long, default_value_t = false)]
@@ -299,62 +302,27 @@ fn main() -> Result<()> {
     let input_path = args.input.as_ref().unwrap();
 
     if args.preprocess_output.is_some() && preprocess_filter.is_none() {
-        return Err(anyhow!(
-            "--preprocess-output requires --preprocess or --preprocess-preset"
-        ));
+        return Err(anyhow!("--preprocess-output requires --preprocess or --preprocess-preset"));
     }
 
-    let is_image_input = input_path.is_file()
-        && matches!(
-            input_path.extension().and_then(|s| s.to_str()),
-            Some("png" | "jpg" | "jpeg")
-        );
+    let is_image_input = input_path.is_file() && matches!(input_path.extension().and_then(|s| s.to_str()), Some("png" | "jpg" | "jpeg"));
 
     if let Some(ref filter) = preprocess_filter {
         if let Some(output_target) = args.preprocess_output.as_ref() {
             let converter = AsciiConverter::with_config(load_config()?)?;
             match detect_preprocess_input_kind(input_path)? {
                 PreprocessInputKind::Directory => {
-                    let count = preprocess_directory(
-                        input_path,
-                        filter,
-                        output_target,
-                        converter.ffmpeg_config(),
-                    )?;
-                    println!(
-                        "Preprocessing completed: {} images written to {}",
-                        count,
-                        output_target.display(),
-                    );
+                    let count = preprocess_directory(input_path, filter, output_target, converter.ffmpeg_config())?;
+                    println!("Preprocessing completed: {} images written to {}", count, output_target.display());
                 }
                 PreprocessInputKind::Image => {
-                    let output_file = resolve_preprocess_output_path(
-                        input_path,
-                        output_target,
-                        PreprocessInputKind::Image,
-                    )?;
-                    preprocess_image_to_file(
-                        input_path,
-                        filter,
-                        &output_file,
-                        converter.ffmpeg_config(),
-                    )?;
+                    let output_file = resolve_preprocess_output_path(input_path, output_target, PreprocessInputKind::Image)?;
+                    preprocess_image_to_file(input_path, filter, &output_file, converter.ffmpeg_config())?;
                     println!("Preprocessed image saved to {}", output_file.display());
                 }
                 PreprocessInputKind::Video => {
-                    let output_file = resolve_preprocess_output_path(
-                        input_path,
-                        output_target,
-                        PreprocessInputKind::Video,
-                    )?;
-                    preprocess_video_to_file(
-                        input_path,
-                        filter,
-                        &output_file,
-                        args.start.as_deref(),
-                        args.end.as_deref(),
-                        converter.ffmpeg_config(),
-                    )?;
+                    let output_file = resolve_preprocess_output_path(input_path, output_target, PreprocessInputKind::Video)?;
+                    preprocess_video_to_file(input_path, filter, &output_file, args.start.as_deref(), args.end.as_deref(), converter.ffmpeg_config())?;
                     println!("Preprocessed video saved to {}", output_file.display());
                 }
             }
@@ -362,9 +330,7 @@ fn main() -> Result<()> {
         }
 
         if input_path.is_dir() {
-            return Err(anyhow!(
-                "Preprocessing a directory requires --preprocess-output to specify where preprocessed images are written"
-            ));
+            return Err(anyhow!("Preprocessing a directory requires --preprocess-output to specify where preprocessed images are written"));
         }
     }
 
@@ -378,10 +344,7 @@ fn main() -> Result<()> {
             }
             p
         } else {
-            let stem = input_path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("output");
+            let stem = input_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
             PathBuf::from(format!("{}_ascii.mp4", stem))
         }
     } else {
@@ -392,10 +355,7 @@ fn main() -> Result<()> {
 
     // If input is a file and not --to-video mode, create a directory for the output
     if input_path.is_file() && !args.to_video {
-        let file_stem = input_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("cascii_output");
+        let file_stem = input_path.file_stem().and_then(|s| s.to_str()).unwrap_or("cascii_output");
         output_path.push(file_stem);
     }
 
@@ -414,67 +374,34 @@ fn main() -> Result<()> {
         cfg.default_preset.as_str()
     };
 
-    let active = cfg
-        .presets
-        .get(active_preset_name)
-        .ok_or_else(|| anyhow!(format!("Missing preset '{}' in config", active_preset_name)))?;
+    let active = cfg.presets.get(active_preset_name).ok_or_else(|| anyhow!(format!("Missing preset '{}' in config", active_preset_name)))?;
     let default_cols = active.columns;
     let default_fps = active.fps;
     let default_ratio = active.font_ratio;
 
     if is_interactive {
         if args.columns.is_none() {
-            args.columns = Some(
-                Input::new()
-                    .with_prompt("Columns (width)")
-                    .default(default_cols)
-                    .interact()?,
-            );
+            args.columns = Some(Input::new().with_prompt("Columns (width)").default(default_cols).interact()?);
         }
 
         if args.font_ratio.is_none() {
-            args.font_ratio = Some(
-                Input::new()
-                    .with_prompt("Font Ratio")
-                    .default(default_ratio)
-                    .interact()?,
-            );
+            args.font_ratio = Some(Input::new().with_prompt("Font Ratio").default(default_ratio).interact()?);
         }
 
         if args.luminance.is_none() {
-            args.luminance = Some(
-                Input::new()
-                    .with_prompt("Luminance threshold")
-                    .default(20u8)
-                    .interact()?,
-            );
+            args.luminance = Some(Input::new().with_prompt("Luminance threshold").default(20u8).interact()?);
         }
 
         if !is_image_input {
             // Video-specific prompts
             if args.fps.is_none() {
-                args.fps = Some(
-                    Input::new()
-                        .with_prompt("Frames per second (FPS)")
-                        .default(default_fps)
-                        .interact()?,
-                );
+                args.fps = Some(Input::new().with_prompt("Frames per second (FPS)").default(default_fps).interact()?);
             }
             if args.start.is_none() {
-                args.start = Some(
-                    Input::new()
-                        .with_prompt("Start time (e.g., 00:00:05)")
-                        .default(cfg.default_start.clone())
-                        .interact()?,
-                );
+                args.start = Some(Input::new().with_prompt("Start time (e.g., 00:00:05)").default(cfg.default_start.clone()).interact()?);
             }
             if args.end.is_none() {
-                args.end = Some(
-                    Input::new()
-                        .with_prompt("End time (e.g., 00:00:10) (optional)")
-                        .default(cfg.default_end.clone())
-                        .interact()?,
-                );
+                args.end = Some(Input::new().with_prompt("End time (e.g., 00:00:10) (optional)").default(cfg.default_end.clone()).interact()?);
             }
         }
     }
@@ -495,21 +422,11 @@ fn main() -> Result<()> {
             .into_iter()
             .filter_map(Result::ok)
             .any(|e| {
-                e.file_name()
-                    .to_str()
-                    .is_some_and(|s| s.starts_with("frame_"))
+                e.file_name().to_str().is_some_and(|s| s.starts_with("frame_"))
             });
 
         if has_frames {
-            if is_interactive
-                && !Confirm::new()
-                    .with_prompt(format!(
-                        "Output directory {} already contains frames. Overwrite?",
-                        output_path.display()
-                    ))
-                    .default(false)
-                    .interact()?
-            {
+            if is_interactive && !Confirm::new().with_prompt(format!("Output directory {} already contains frames. Overwrite?", output_path.display())).default(false).interact()? {
                 println!("Operation cancelled.");
                 return Ok(());
             }
@@ -519,12 +436,7 @@ fn main() -> Result<()> {
                 let entry = entry?;
                 let path = entry.path();
                 if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
-                    if name.starts_with("frame_")
-                        && (name.ends_with(".png")
-                            || name.ends_with(".txt")
-                            || name.ends_with(".cframe")
-                            || name.ends_with(".colors"))
-                    {
+                    if name.starts_with("frame_") && (name.ends_with(".png") || name.ends_with(".txt") || name.ends_with(".cframe") || name.ends_with(".colors")) {
                         fs::remove_file(path)?;
                     }
                 }
@@ -541,6 +453,10 @@ fn main() -> Result<()> {
         OutputMode::TextOnly
     };
 
+    if args.fit_cell_backgrounds && !args.to_video {
+        return Err(anyhow!("--fit-cell-backgrounds currently requires --to-video because background colors are not persisted in .cframe yet"));
+    }
+
     // Create conversion options
     let conv_opts = ConversionOptions {
         columns: Some(columns),
@@ -548,6 +464,7 @@ fn main() -> Result<()> {
         luminance,
         ascii_chars: cfg.ascii_chars.clone(),
         output_mode: output_mode.clone(),
+        cell_color_mode: if args.fit_cell_backgrounds { CellColorMode::FitForegroundBackground } else { CellColorMode::ForegroundOnly },
     };
 
     if input_path.is_file() {
@@ -555,41 +472,15 @@ fn main() -> Result<()> {
             println!("Converting image to ASCII...");
             let preprocessed_image = if let Some(filter) = preprocess_filter.as_deref() {
                 println!("Applying preprocessing filter before ASCII conversion...");
-                Some(preprocess_image_to_temp(
-                    input_path,
-                    filter,
-                    converter.ffmpeg_config(),
-                )?)
+                Some(preprocess_image_to_temp(input_path, filter, converter.ffmpeg_config())?)
             } else {
                 None
             };
-            let image_input = preprocessed_image
-                .as_ref()
-                .map_or(input_path.as_path(), |f| f.path());
-            converter.convert_image(
-                image_input,
-                &output_path.join(format!(
-                    "{}.txt",
-                    input_path.file_stem().unwrap().to_str().unwrap()
-                )),
-                &conv_opts,
-            )?;
+            let image_input = preprocessed_image.as_ref().map_or(input_path.as_path(), |f| f.path());
+            converter.convert_image(image_input, &output_path.join(format!("{}.txt", input_path.file_stem().unwrap().to_str().unwrap())), &conv_opts)?;
         } else if args.to_video {
-            let video_opts = VideoOptions {
-                fps,
-                start: args.start.clone(),
-                end: args.end.clone(),
-                columns,
-                extract_audio: args.audio,
-                preprocess_filter: preprocess_filter.clone(),
-            };
-            let to_video_opts = ToVideoOptions {
-                output_path: video_output_path.clone(),
-                font_size: args.video_font_size,
-                crf: args.crf,
-                mux_audio: args.audio,
-                use_colors: None,
-            };
+            let video_opts = VideoOptions {fps, start: args.start.clone(), end: args.end.clone(), columns, extract_audio: args.audio, preprocess_filter: preprocess_filter.clone()};
+            let to_video_opts = ToVideoOptions {output_path: video_output_path.clone(), font_size: args.video_font_size, crf: args.crf, mux_audio: args.audio, use_colors: None};
 
             // Create progress bar for multi-phase progress
             let progress_bar: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
@@ -597,11 +488,7 @@ fn main() -> Result<()> {
             let pb_clone = Arc::clone(&progress_bar);
             let spinner_clone = Arc::clone(&spinner);
 
-            converter.convert_video_to_video(
-                input_path,
-                &video_opts,
-                &conv_opts,
-                &to_video_opts,
+            converter.convert_video_to_video(input_path, &video_opts, &conv_opts, &to_video_opts,
                 move |progress: Progress| {
                     match progress.phase {
                         ProgressPhase::ExtractingFrames => {
@@ -657,26 +544,14 @@ fn main() -> Result<()> {
             println!("\nASCII video saved to {}", video_output_path.display());
             return Ok(());
         } else {
-            let video_opts = VideoOptions {
-                fps,
-                start: args.start.clone(),
-                end: args.end.clone(),
-                columns,
-                extract_audio: args.audio,
-                preprocess_filter: preprocess_filter.clone(),
-            };
+            let video_opts = VideoOptions {fps, start: args.start.clone(), end: args.end.clone(), columns, extract_audio: args.audio, preprocess_filter: preprocess_filter.clone()};
             // Create progress bar for multi-phase progress
             let progress_bar: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
             let spinner: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
             let pb_clone = Arc::clone(&progress_bar);
             let spinner_clone = Arc::clone(&spinner);
 
-            converter.convert_video_with_detailed_progress(
-                input_path,
-                &output_path,
-                &video_opts,
-                &conv_opts,
-                args.keep_images,
+            converter.convert_video_with_detailed_progress(input_path, &output_path, &video_opts, &conv_opts, args.keep_images,
                 move |progress: Progress| {
                     match progress.phase {
                         ProgressPhase::ExtractingFrames => {
@@ -684,11 +559,7 @@ fn main() -> Result<()> {
                             let mut sp_guard = spinner_clone.lock().unwrap();
                             if sp_guard.is_none() {
                                 let sp = ProgressBar::new_spinner();
-                                sp.set_style(
-                                    ProgressStyle::default_spinner()
-                                        .template("{spinner:.green} {msg}")
-                                        .unwrap()
-                                );
+                                sp.set_style(ProgressStyle::default_spinner().template("{spinner:.green} {msg}").unwrap());
                                 sp.set_message("Extracting frames from video...");
                                 sp.enable_steady_tick(std::time::Duration::from_millis(100));
                                 *sp_guard = Some(sp);
@@ -718,12 +589,7 @@ fn main() -> Result<()> {
                             if pb_guard.is_none() && progress.total > 0 {
                                 // Initialize progress bar on first conversion callback
                                 let pb = ProgressBar::new(progress.total as u64);
-                                pb.set_style(
-                                    ProgressStyle::default_bar()
-                                        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%)")
-                                        .unwrap()
-                                        .progress_chars("#>-"),
-                                );
+                                pb.set_style(ProgressStyle::default_bar().template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%)").unwrap().progress_chars("#>-"));
                                 pb.set_message("Converting frames");
                                 *pb_guard = Some(pb);
                             }
@@ -746,13 +612,10 @@ fn main() -> Result<()> {
         }
     } else if input_path.is_dir() {
         if args.to_video {
-            let to_video_opts = ToVideoOptions {
-                output_path: video_output_path.clone(),
-                font_size: args.video_font_size,
-                crf: args.crf,
-                mux_audio: args.audio,
-                use_colors: None,
-            };
+            if args.fit_cell_backgrounds {
+                return Err(anyhow!("--fit-cell-backgrounds currently only works when converting a source video directly to video, not when rendering an existing frame directory"));
+            }
+            let to_video_opts = ToVideoOptions {output_path: video_output_path.clone(), font_size: args.video_font_size, crf: args.crf, mux_audio: args.audio, use_colors: None};
             let progress_bar: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
             let pb_clone = Arc::clone(&progress_bar);
 
@@ -793,13 +656,7 @@ fn main() -> Result<()> {
             } else {
                 "txt"
             };
-            let frame_count = WalkDir::new(&output_path)
-                .min_depth(1)
-                .max_depth(1)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().is_some_and(|ext| ext == frame_ext))
-                .count();
+            let frame_count = WalkDir::new(&output_path).min_depth(1).max_depth(1).into_iter().filter_map(|e| e.ok()).filter(|e| e.path().extension().is_some_and(|ext| ext == frame_ext)).count();
 
             let mode_str = match output_mode {
                 OutputMode::TextOnly => "text-only",
@@ -807,22 +664,9 @@ fn main() -> Result<()> {
                 OutputMode::TextAndColor => "text+color",
             };
 
-            let result = cascii::ConversionResult {
-                frame_count,
-                columns,
-                font_ratio,
-                luminance,
-                fps: None,
-                output_mode: mode_str.to_string(),
-                audio_extracted: false,
-                output_dir: output_path.clone(),
-                background_color: "black".to_string(),
-                color: "white".to_string(),
-            };
+            let result = cascii::ConversionResult {frame_count, columns, font_ratio, luminance, fps: None, output_mode: mode_str.to_string(), audio_extracted: false, output_dir: output_path.clone(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds: args.fit_cell_backgrounds};
 
-            result
-                .write_details_file()
-                .context("writing details file")?;
+            result.write_details_file().context("writing details file")?;
             let details = result.to_details_string();
 
             if args.log_details {
@@ -840,39 +684,15 @@ fn main() -> Result<()> {
 }
 
 fn find_media_files() -> Result<Vec<String>> {
-    Ok(WalkDir::new(".")
-        .max_depth(1)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path().is_file()
-                && e.path().extension().is_some_and(|ext| {
-                    matches!(
-                        ext.to_str(),
-                        Some("mp4" | "mkv" | "mov" | "avi" | "webm" | "png" | "jpg")
-                    )
-                })
-        })
-        .map(|e| e.path().to_str().unwrap_or("").to_string())
-        .collect())
+    Ok(WalkDir::new(".").max_depth(1).into_iter().filter_map(|e| e.ok()).filter(|e| {e.path().is_file() && e.path().extension().is_some_and(|ext| {matches!(ext.to_str(), Some("mp4" | "mkv" | "mov" | "avi" | "webm" | "png" | "jpg"))})}).map(|e| e.path().to_str().unwrap_or("").to_string()).collect())
 }
 
 fn run_uninstall(is_interactive: bool) -> Result<()> {
     let bin_paths = vec!["/usr/local/bin/cascii", "/usr/local/bin/casci"]; // legacy symlink
-    let app_support = dirs::data_dir()
-        .unwrap_or_else(|| {
-            PathBuf::from(format!(
-                "{}/Library/Application Support",
-                std::env::var("HOME").unwrap_or_default()
-            ))
-        })
-        .join("cascii");
+    let app_support = dirs::data_dir().unwrap_or_else(|| {PathBuf::from(format!("{}/Library/Application Support", std::env::var("HOME").unwrap_or_default()))}).join("cascii");
 
     if is_interactive {
-        let confirmed = Confirm::new()
-            .with_prompt("This will remove cascii and its app support directory. Continue?")
-            .default(false)
-            .interact()?;
+        let confirmed = Confirm::new().with_prompt("This will remove cascii and its app support directory. Continue?").default(false).interact()?;
         if !confirmed {
             println!("Uninstall cancelled.");
             return Ok(());
@@ -890,11 +710,7 @@ fn run_uninstall(is_interactive: bool) -> Result<()> {
 
     if app_support.exists() {
         if let Err(e) = fs::remove_dir_all(&app_support) {
-            eprintln!(
-                "Warning: failed to remove app support directory {}: {}",
-                app_support.display(),
-                e
-            );
+            eprintln!("Warning: failed to remove app support directory {}: {}", app_support.display(), e);
         }
     }
 

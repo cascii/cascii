@@ -264,6 +264,8 @@ pub struct ConversionResult {
     pub background_color: String,
     /// Foreground color name
     pub color: String,
+    /// Whether per-cell background fitting was enabled
+    pub fit_cell_backgrounds: bool,
 }
 
 /// Serializable details written to `details.toml`
@@ -280,6 +282,7 @@ struct Details {
     audio: bool,
     background_color: String,
     color: String,
+    fit_cell_backgrounds: bool,
 }
 
 impl ConversionResult {
@@ -295,6 +298,7 @@ impl ConversionResult {
             audio: self.audio_extracted,
             background_color: self.background_color.clone(),
             color: self.color.clone(),
+            fit_cell_backgrounds: self.fit_cell_backgrounds,
         }
     }
 
@@ -374,6 +378,15 @@ pub enum OutputMode {
     TextAndColor,
 }
 
+/// Controls how per-cell colors are modeled during conversion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CellColorMode {
+    /// Current behavior: a single foreground color per character cell.
+    ForegroundOnly,
+    /// Experimental option C: fit both foreground and background colors per cell.
+    FitForegroundBackground,
+}
+
 /// Options for ASCII conversion
 #[derive(Debug, Clone)]
 pub struct ConversionOptions {
@@ -387,6 +400,8 @@ pub struct ConversionOptions {
     pub ascii_chars: String,
     /// What output files to generate
     pub output_mode: OutputMode,
+    /// How per-cell colors should be modeled during conversion
+    pub cell_color_mode: CellColorMode,
 }
 
 impl Default for ConversionOptions {
@@ -397,6 +412,7 @@ impl Default for ConversionOptions {
             luminance: 20,
             ascii_chars: default_ascii_chars(),
             output_mode: OutputMode::TextOnly,
+            cell_color_mode: CellColorMode::ForegroundOnly,
         }
     }
 }
@@ -432,6 +448,12 @@ impl ConversionOptions {
         self
     }
 
+    /// Set the per-cell color mode
+    pub fn with_cell_color_mode(mut self, mode: CellColorMode) -> Self {
+        self.cell_color_mode = mode;
+        self
+    }
+
     /// Create options from a preset
     pub fn from_preset(preset: &Preset, ascii_chars: String) -> Self {
         Self {
@@ -440,6 +462,7 @@ impl ConversionOptions {
             luminance: preset.luminance,
             ascii_chars,
             output_mode: OutputMode::TextOnly,
+            cell_color_mode: CellColorMode::ForegroundOnly,
         }
     }
 }
@@ -595,7 +618,7 @@ impl AsciiConverter {
     /// ```
     pub fn convert_image(&self, input: &Path, output: &Path, options: &ConversionOptions) -> Result<()> {
         let ascii_chars = options.ascii_chars.as_bytes();
-        convert::convert_image_to_ascii(input, output, options.font_ratio, options.luminance, options.columns, ascii_chars, &options.output_mode)
+        convert::convert_image_to_ascii(input, output, options.font_ratio, options.luminance, options.columns, ascii_chars, &options.output_mode, options.cell_color_mode)
     }
 
     /// Convert image to ASCII string (without writing to file)
@@ -698,7 +721,7 @@ impl AsciiConverter {
 
         // Convert frames to ASCII with progress callback
         let ascii_chars = conv_opts.ascii_chars.as_bytes();
-        let total_frames = convert::convert_directory_parallel_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, keep_images, ascii_chars, &conv_opts.output_mode, progress_callback)?;
+        let total_frames = convert::convert_directory_parallel_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, keep_images, ascii_chars, &conv_opts.output_mode, conv_opts.cell_color_mode, progress_callback)?;
 
         // Build result with conversion details
         let output_mode_str = match conv_opts.output_mode {
@@ -718,6 +741,7 @@ impl AsciiConverter {
             output_dir: output_dir.to_path_buf(),
             background_color: "black".to_string(),
             color: "white".to_string(),
+            fit_cell_backgrounds: matches!(conv_opts.cell_color_mode, CellColorMode::FitForegroundBackground),
         };
 
         // Write the details.toml file
@@ -792,7 +816,7 @@ impl AsciiConverter {
 
         // Phase 3: Convert frames to ASCII with progress
         let ascii_chars = conv_opts.ascii_chars.as_bytes();
-        let total_frames = convert::convert_directory_parallel_with_detailed_progress(output_dir,  output_dir, conv_opts.font_ratio, conv_opts.luminance, keep_images, ascii_chars, &conv_opts.output_mode, &progress_callback)?;
+        let total_frames = convert::convert_directory_parallel_with_detailed_progress(output_dir,  output_dir, conv_opts.font_ratio, conv_opts.luminance, keep_images, ascii_chars, &conv_opts.output_mode, conv_opts.cell_color_mode, &progress_callback)?;
 
         // Phase 4: Complete
         progress_callback(Progress::complete(total_frames));
@@ -815,6 +839,7 @@ impl AsciiConverter {
             output_dir: output_dir.to_path_buf(),
             background_color: "black".to_string(),
             color: "white".to_string(),
+            fit_cell_backgrounds: matches!(conv_opts.cell_color_mode, CellColorMode::FitForegroundBackground),
         };
 
         // Write the details.toml file
@@ -836,7 +861,7 @@ impl AsciiConverter {
     pub fn convert_directory(&self, input_dir: &Path, output_dir: &Path, options: &ConversionOptions, keep_images: bool) -> Result<usize> {
         fs::create_dir_all(output_dir)?;
         let ascii_chars = options.ascii_chars.as_bytes();
-        convert::convert_directory_parallel(input_dir, output_dir, options.font_ratio, options.luminance, keep_images, ascii_chars, &options.output_mode)
+        convert::convert_directory_parallel(input_dir, output_dir, options.font_ratio, options.luminance, keep_images, ascii_chars, &options.output_mode, options.cell_color_mode)
     }
 
     /// Convert a directory of images to ASCII frames with detailed progress reporting
@@ -872,7 +897,7 @@ impl AsciiConverter {
     pub fn convert_directory_with_progress<F>(&self, input_dir: &Path, output_dir: &Path, options: &ConversionOptions, keep_images: bool, progress_callback: F) -> Result<usize> where F: Fn(Progress) + Send + Sync {
         fs::create_dir_all(output_dir)?;
         let ascii_chars = options.ascii_chars.as_bytes();
-        convert::convert_directory_parallel_with_detailed_progress(input_dir, output_dir, options.font_ratio, options.luminance, keep_images, ascii_chars, &options.output_mode, &progress_callback)
+        convert::convert_directory_parallel_with_detailed_progress(input_dir, output_dir, options.font_ratio, options.luminance, keep_images, ascii_chars, &options.output_mode, options.cell_color_mode, &progress_callback)
     }
 
     /// Get a preset by name
@@ -944,10 +969,9 @@ impl AsciiConverter {
 
         // Phase 4: Convert first frame to determine output resolution
         let ascii_chars = conv_opts.ascii_chars.as_bytes();
-        let (first_ascii, first_w, first_h, _) = convert::image_to_ascii_with_colors(&png_paths[0], conv_opts.font_ratio, conv_opts.luminance, conv_opts.columns, ascii_chars)?;
-        let _ = first_ascii; // we only need dimensions
-        let mut pixel_w = first_w * atlas.cell_width;
-        let mut pixel_h = first_h * atlas.cell_height;
+        let first_frame = convert::image_to_ascii_frame_data(&png_paths[0], conv_opts.font_ratio, conv_opts.luminance, conv_opts.columns, ascii_chars, conv_opts.cell_color_mode)?;
+        let mut pixel_w = first_frame.width_chars * atlas.cell_width;
+        let mut pixel_h = first_frame.height_chars * atlas.cell_height;
         // H.264 requires even dimensions
         if pixel_w % 2 != 0 {
             pixel_w += 1;
@@ -975,8 +999,7 @@ impl AsciiConverter {
             let frame_data: Vec<convert::AsciiFrameData> = batch
                 .par_iter()
                 .map(|path| {
-                    let (ascii_text, width_chars, height_chars, rgb_colors) = convert::image_to_ascii_with_colors(path, conv_opts.font_ratio, conv_opts.luminance, conv_opts.columns, ascii_chars)?;
-                    Ok(convert::AsciiFrameData {ascii_text, width_chars, height_chars, rgb_colors})
+                    convert::image_to_ascii_frame_data(path, conv_opts.font_ratio, conv_opts.luminance, conv_opts.columns, ascii_chars, conv_opts.cell_color_mode)
                 })
                 .collect::<Result<Vec<_>>>()?;
 
@@ -1038,6 +1061,7 @@ impl AsciiConverter {
             output_dir: to_video_opts.output_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
             background_color: "black".to_string(),
             color: "white".to_string(),
+            fit_cell_backgrounds: matches!(conv_opts.cell_color_mode, CellColorMode::FitForegroundBackground),
         })
     }
 
@@ -1193,6 +1217,7 @@ impl AsciiConverter {
             output_dir: to_video_opts.output_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
             background_color: "black".to_string(),
             color: "white".to_string(),
+            fit_cell_backgrounds: first_frame.bg_rgb_colors.len() == (first_frame.width_chars * first_frame.height_chars * 3) as usize,
         })
     }
 }
