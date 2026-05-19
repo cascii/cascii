@@ -60,18 +60,7 @@ pub(crate) fn extract_video_frames(input: &Path, out_dir: &Path, columns: u32, f
 
 /// Get video duration in microseconds using ffprobe
 pub(crate) fn get_video_duration_us(input: &Path, ffmpeg_config: &FfmpegConfig) -> Result<u64> {
-    let output = ProcCommand::new(ffmpeg_config.ffprobe_cmd())
-        .args([
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            input.to_str().unwrap(),
-        ])
-        .output()
-        .context("running ffprobe")?;
+    let output = ProcCommand::new(ffmpeg_config.ffprobe_cmd()).args(["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", input.to_str().unwrap()]).output().context("running ffprobe")?;
 
     if !output.status.success() {
         return Err(anyhow!("ffprobe failed to get duration"));
@@ -94,13 +83,7 @@ pub(crate) fn extract_video_frames_with_progress<F>(input: &Path, out_dir: &Path
     // Get video duration for progress calculation
     let _total_duration_us = get_video_duration_us(input, ffmpeg_config).unwrap_or(0);
 
-    let mut ffmpeg_args: Vec<String> = vec![
-        "-loglevel".into(),
-        "error".into(),
-        "-progress".into(),
-        "pipe:1".into(),
-        "-nostats".into(),
-    ];
+    let mut ffmpeg_args: Vec<String> = vec!["-loglevel".into(), "error".into(), "-progress".into(), "pipe:1".into(), "-nostats".into()];
 
     if let Some(s) = start {
         if !s.is_empty() && s != "0" {
@@ -110,12 +93,7 @@ pub(crate) fn extract_video_frames_with_progress<F>(input: &Path, out_dir: &Path
     }
 
     ffmpeg_args.push("-i".into());
-    ffmpeg_args.push(
-        input
-            .to_str()
-            .ok_or_else(|| anyhow!("input path is not valid UTF-8"))?
-            .to_string(),
-    );
+    ffmpeg_args.push(input.to_str().ok_or_else(|| anyhow!("input path is not valid UTF-8"))?.to_string());
 
     if let Some(e) = end {
         if !e.is_empty() {
@@ -145,12 +123,7 @@ pub(crate) fn extract_video_frames_with_progress<F>(input: &Path, out_dir: &Path
     ffmpeg_args.push(out_pattern.to_str().ok_or_else(|| anyhow!("output path is not valid UTF-8"))?.to_string());
     progress_callback(Progress::extracting_frames());
 
-    let mut child = ProcCommand::new(ffmpeg_config.ffmpeg_cmd())
-        .args(&ffmpeg_args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .context("spawning ffmpeg")?;
+    let mut child = ProcCommand::new(ffmpeg_config.ffmpeg_cmd()).args(&ffmpeg_args).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().context("spawning ffmpeg")?;
 
     let status = child.wait().context("waiting for ffmpeg")?;
     if !status.success() {
@@ -204,10 +177,7 @@ pub(crate) fn extract_audio(input: &Path, out_dir: &Path, start: Option<&str>, e
     ffmpeg_args.push("2".into());
     ffmpeg_args.push(out_audio.to_str().unwrap().to_string());
 
-    let status = ProcCommand::new(ffmpeg_config.ffmpeg_cmd())
-        .args(&ffmpeg_args)
-        .status()
-        .context("running ffmpeg for audio extraction")?;
+    let status = ProcCommand::new(ffmpeg_config.ffmpeg_cmd()).args(&ffmpeg_args).status().context("running ffmpeg for audio extraction")?;
 
     if !status.success() {
         return Err(anyhow!("ffmpeg audio extraction failed"));

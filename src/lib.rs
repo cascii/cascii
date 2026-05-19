@@ -934,7 +934,9 @@ impl AsciiConverter {
 
     fn convert_video_to_video_inner<F>(&self, input: &Path, video_opts: &VideoOptions, conv_opts: &ConversionOptions, to_video_opts: &ToVideoOptions, temp_dir: &Path, progress_callback: &F) -> Result<ConversionResult> where F: Fn(Progress) + Send + Sync {
         use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::mpsc::sync_channel;
         use std::sync::Arc;
+        use std::thread;
 
         // Phase 1: Extract frames from video
         video::extract_video_frames_with_progress(input, temp_dir, video_opts, &self.ffmpeg_config, progress_callback)?;
@@ -969,7 +971,11 @@ impl AsciiConverter {
 
         // Phase 4: Convert first frame to determine output resolution
         let ascii_chars = conv_opts.ascii_chars.as_bytes();
-        let first_frame = convert::image_to_ascii_frame_data(&png_paths[0], conv_opts.font_ratio, conv_opts.luminance, conv_opts.columns, ascii_chars, conv_opts.cell_color_mode)?;
+        let background_analysis = match conv_opts.cell_color_mode {
+            CellColorMode::ForegroundOnly => None,
+            CellColorMode::FitForegroundBackground => Some(render::background_analysis_context(ascii_chars)?),
+        };
+        let first_frame = convert::image_to_ascii_frame_data_with_analysis(&png_paths[0], conv_opts.font_ratio, conv_opts.luminance, conv_opts.columns, ascii_chars, conv_opts.cell_color_mode, background_analysis.as_ref())?;
         let mut pixel_w = first_frame.width_chars * atlas.cell_width;
         let mut pixel_h = first_frame.height_chars * atlas.cell_height;
         // H.264 requires even dimensions
@@ -981,8 +987,8 @@ impl AsciiConverter {
         }
 
         // Phase 5: Spawn ffmpeg encoder
-        let mut child = render::spawn_ffmpeg_encoder(pixel_w, pixel_h, video_opts.fps, to_video_opts.crf, audio_path.as_deref(), &to_video_opts.output_path, &self.ffmpeg_config)?;
-        let mut stdin = child.stdin.take().ok_or_else(|| anyhow!("failed to open ffmpeg stdin pipe"))?;
+        let mut child = Some(render::spawn_ffmpeg_encoder(pixel_w, pixel_h, video_opts.fps, to_video_opts.crf, audio_path.as_deref(), &to_video_opts.output_path, &self.ffmpeg_config)?);
+        let mut stdin = Some(child.as_mut().and_then(|child| child.stdin.take()).ok_or_else(|| anyhow!("failed to open ffmpeg stdin pipe"))?);
         let use_colors = conv_opts.output_mode != OutputMode::TextOnly;
 
         // Phase 6: Process frames in batches
@@ -991,48 +997,60 @@ impl AsciiConverter {
 
         progress_callback(Progress::rendering_video(0, total_frames));
 
-        for batch_start in (0..total_frames).step_by(batch_size) {
-            let batch_end = (batch_start + batch_size).min(total_frames);
-            let batch = &png_paths[batch_start..batch_end];
-
-            // Convert batch in parallel to AsciiFrameData
-            let frame_data: Vec<convert::AsciiFrameData> = batch
-                .par_iter()
-                .map(|path| {
-                    convert::image_to_ascii_frame_data(path, conv_opts.font_ratio, conv_opts.luminance, conv_opts.columns, ascii_chars, conv_opts.cell_color_mode)
-                })
-                .collect::<Result<Vec<_>>>()?;
-
-            // Render and pipe sequentially (preserves frame order)
-            for frame in &frame_data {
-                let rgb_buf = render::render_ascii_frame_to_rgb(frame, &atlas, use_colors);
-                if let Err(e) = stdin.write_all(&rgb_buf) {
-                    // Check if ffmpeg died
-                    drop(stdin);
-                    let output = child.wait_with_output().context("waiting for ffmpeg")?;
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    return Err(anyhow!("ffmpeg encoding failed: {} (stderr: {})", e, stderr));
+        thread::scope(|scope| -> Result<()> {
+            let (sender, receiver) = sync_channel::<Result<Vec<convert::AsciiFrameData>>>(2);
+            let worker = scope.spawn(move || {
+                for batch_start in (0..total_frames).step_by(batch_size) {
+                    let batch_end = (batch_start + batch_size).min(total_frames);
+                    let batch = &png_paths[batch_start..batch_end];
+                    let frame_data: Result<Vec<convert::AsciiFrameData>> = batch
+                        .par_iter()
+                        .map(|path| {
+                            convert::image_to_ascii_frame_data_with_analysis(path, conv_opts.font_ratio, conv_opts.luminance, conv_opts.columns, ascii_chars, conv_opts.cell_color_mode, background_analysis.as_ref())
+                        })
+                        .collect();
+                    if sender.send(frame_data).is_err() {
+                        return;
+                    }
                 }
+            });
 
-                let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
-                let current_percent = current.checked_mul(100).and_then(|value| value.checked_div(total_frames)).unwrap_or(0);
-                let last_percent = if current > 1 {
-                    ((current - 1) * 100) / total_frames
-                } else {
-                    0
-                };
+            for frame_data in receiver {
+                let frame_data = frame_data?;
 
-                if current_percent > last_percent || current == total_frames {
-                    progress_callback(Progress::rendering_video(current, total_frames));
+                // Render and pipe sequentially (preserves frame order)
+                for frame in &frame_data {
+                    let rgb_buf = render::render_ascii_frame_to_rgb(frame, &atlas, use_colors);
+                    if let Err(e) = stdin.as_mut().unwrap().write_all(&rgb_buf) {
+                        drop(stdin.take());
+                        let output = child.take().unwrap().wait_with_output().context("waiting for ffmpeg")?;
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        return Err(anyhow!("ffmpeg encoding failed: {} (stderr: {})", e, stderr));
+                    }
+
+                    let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                    let current_percent = current.checked_mul(100).and_then(|value| value.checked_div(total_frames)).unwrap_or(0);
+                    let last_percent = if current > 1 {
+                        ((current - 1) * 100) / total_frames
+                    } else {
+                        0
+                    };
+
+                    if current_percent > last_percent || current == total_frames {
+                        progress_callback(Progress::rendering_video(current, total_frames));
+                    }
                 }
             }
-        }
+
+            worker.join().map_err(|_| anyhow!("frame conversion worker panicked"))?;
+            Ok(())
+        })?;
 
         // Close stdin to signal end of input
-        drop(stdin);
+        drop(stdin.take());
 
         // Wait for ffmpeg to finish
-        let output = child.wait_with_output().context("waiting for ffmpeg")?;
+        let output = child.take().unwrap().wait_with_output().context("waiting for ffmpeg")?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(anyhow!("ffmpeg encoding failed: {}", stderr));
@@ -1070,32 +1088,12 @@ impl AsciiConverter {
         use std::sync::Arc;
 
         // Scan for .cframe files first, then fall back to .txt
-        let mut frame_paths: Vec<PathBuf> = WalkDir::new(input_dir)
-            .min_depth(1)
-            .max_depth(1)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .map(|e| e.into_path())
-            .filter(|p| p.extension().map(|e| e == "cframe").unwrap_or(false))
-            .collect();
+        let mut frame_paths: Vec<PathBuf> = WalkDir::new(input_dir).min_depth(1).max_depth(1).into_iter().filter_map(|e| e.ok()).map(|e| e.into_path()).filter(|p| p.extension().map(|e| e == "cframe").unwrap_or(false)).collect();
 
         let use_cframes = !frame_paths.is_empty();
 
         if !use_cframes {
-            frame_paths = WalkDir::new(input_dir)
-                .min_depth(1)
-                .max_depth(1)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .map(|e| e.into_path())
-                .filter(|p| {
-                    p.extension().map(|e| e == "txt").unwrap_or(false)
-                        && p.file_name()
-                            .and_then(|n| n.to_str())
-                            .map(|n| n.starts_with("frame_"))
-                            .unwrap_or(false)
-                })
-                .collect();
+            frame_paths = WalkDir::new(input_dir).min_depth(1).max_depth(1).into_iter().filter_map(|e| e.ok()).map(|e| e.into_path()).filter(|p| {p.extension().map(|e| e == "txt").unwrap_or(false) && p.file_name().and_then(|n| n.to_str()).map(|n| n.starts_with("frame_")).unwrap_or(false)}).collect();
         }
 
         frame_paths.sort();
@@ -1151,16 +1149,13 @@ impl AsciiConverter {
             let batch = &frame_paths[batch_start..batch_end];
 
             // Read batch in parallel
-            let frame_data: Vec<convert::AsciiFrameData> = batch
-                .par_iter()
-                .map(|path| {
+            let frame_data: Vec<convert::AsciiFrameData> = batch.par_iter().map(|path| {
                     if use_cframes {
                         convert::read_cframe_to_frame_data(path)
                     } else {
                         convert::read_txt_to_frame_data(path)
                     }
-                })
-                .collect::<Result<Vec<_>>>()?;
+                }).collect::<Result<Vec<_>>>()?;
 
             // Render and pipe sequentially
             for frame in &frame_data {

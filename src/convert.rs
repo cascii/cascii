@@ -21,13 +21,28 @@ pub(crate) struct AsciiFrameData {
     pub(crate) bg_rgb_colors: Vec<u8>,
 }
 
+fn background_analysis_for_mode(ascii_chars: &[u8], cell_color_mode: CellColorMode) -> Result<Option<render::BackgroundAnalysisContext>> {
+    match cell_color_mode {
+        CellColorMode::ForegroundOnly => Ok(None),
+        CellColorMode::FitForegroundBackground => render::background_analysis_context(ascii_chars).map(Some),
+    }
+}
+
 pub(crate) fn image_to_ascii_frame_data(img_path: &Path, font_ratio: f32, threshold: u8, columns: Option<u32>, ascii_chars: &[u8], cell_color_mode: CellColorMode) -> Result<AsciiFrameData> {
+    let background_analysis = background_analysis_for_mode(ascii_chars, cell_color_mode)?;
+    image_to_ascii_frame_data_with_analysis(img_path, font_ratio, threshold, columns, ascii_chars, cell_color_mode, background_analysis.as_ref())
+}
+
+pub(crate) fn image_to_ascii_frame_data_with_analysis(img_path: &Path, font_ratio: f32, threshold: u8, columns: Option<u32>, ascii_chars: &[u8], cell_color_mode: CellColorMode, background_analysis: Option<&render::BackgroundAnalysisContext>) -> Result<AsciiFrameData> {
     match cell_color_mode {
         CellColorMode::ForegroundOnly => {
             let (ascii_text, width_chars, height_chars, rgb_colors) = image_to_ascii_with_colors(img_path, font_ratio, threshold, columns, ascii_chars)?;
             Ok(AsciiFrameData { ascii_text, width_chars, height_chars, rgb_colors, bg_rgb_colors: Vec::new() })
         }
-        CellColorMode::FitForegroundBackground => render::fit_image_to_ascii_with_cell_backgrounds(img_path, font_ratio, threshold, columns, ascii_chars),
+        CellColorMode::FitForegroundBackground => match background_analysis {
+            Some(background_analysis) => render::fit_image_to_ascii_with_cell_backgrounds_with_context(img_path, font_ratio, threshold, columns, background_analysis),
+            None => render::fit_image_to_ascii_with_cell_backgrounds(img_path, font_ratio, threshold, columns, ascii_chars),
+        },
     }
 }
 
@@ -45,6 +60,28 @@ pub(crate) fn convert_image_to_ascii(img_path: &Path, out_txt: &Path, font_ratio
         }
         OutputMode::TextAndColor => {
             let frame = image_to_ascii_frame_data(img_path, font_ratio, threshold, columns, ascii_chars, cell_color_mode)?;
+            fs::write(out_txt, &frame.ascii_text).with_context(|| format!("writing {}", out_txt.display()))?;
+            let cframe_path = out_txt.with_extension("cframe");
+            write_cframe_binary(frame.width_chars, frame.height_chars, &frame.ascii_text, &frame.rgb_colors, if frame.bg_rgb_colors.is_empty() { None } else { Some(frame.bg_rgb_colors.as_slice()) }, &cframe_path)?;
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn convert_image_to_ascii_with_analysis(img_path: &Path, out_txt: &Path, font_ratio: f32, threshold: u8, columns: Option<u32>, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, background_analysis: Option<&render::BackgroundAnalysisContext>) -> Result<()> {
+    match output_mode {
+        OutputMode::TextOnly => {
+            let ascii_string = image_to_ascii_string(img_path, font_ratio, threshold, columns, ascii_chars)?;
+            fs::write(out_txt, ascii_string).with_context(|| format!("writing {}", out_txt.display()))?;
+        }
+        OutputMode::ColorOnly => {
+            let frame = image_to_ascii_frame_data_with_analysis(img_path, font_ratio, threshold, columns, ascii_chars, cell_color_mode, background_analysis)?;
+            let cframe_path = out_txt.with_extension("cframe");
+            write_cframe_binary(frame.width_chars, frame.height_chars, &frame.ascii_text, &frame.rgb_colors, if frame.bg_rgb_colors.is_empty() { None } else { Some(frame.bg_rgb_colors.as_slice()) }, &cframe_path)?;
+        }
+        OutputMode::TextAndColor => {
+            let frame = image_to_ascii_frame_data_with_analysis(img_path, font_ratio, threshold, columns, ascii_chars, cell_color_mode, background_analysis)?;
             fs::write(out_txt, &frame.ascii_text).with_context(|| format!("writing {}", out_txt.display()))?;
             let cframe_path = out_txt.with_extension("cframe");
             write_cframe_binary(frame.width_chars, frame.height_chars, &frame.ascii_text, &frame.rgb_colors, if frame.bg_rgb_colors.is_empty() { None } else { Some(frame.bg_rgb_colors.as_slice()) }, &cframe_path)?;
@@ -279,11 +316,12 @@ pub(crate) fn convert_directory_parallel_with_progress<F>(src_dir: &Path, dst_di
 
     let total = pngs.len();
     let completed = Arc::new(AtomicUsize::new(0));
+    let background_analysis = background_analysis_for_mode(ascii_chars, cell_color_mode)?;
 
     pngs.par_iter().try_for_each(|img_path| -> Result<()> {
         let file_stem = img_path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| anyhow!("bad file name"))?;
         let out_txt = dst_dir.join(format!("{}.txt", file_stem));
-        convert_image_to_ascii(img_path, &out_txt, font_ratio, threshold, None, ascii_chars, output_mode, cell_color_mode)?;
+        convert_image_to_ascii_with_analysis(img_path, &out_txt, font_ratio, threshold, None, ascii_chars, output_mode, cell_color_mode, background_analysis.as_ref())?;
 
         // Update progress
         let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
@@ -316,6 +354,7 @@ pub(crate) fn convert_directory_parallel_with_detailed_progress<F>(src_dir: &Pat
     let total = pngs.len();
     let completed = Arc::new(AtomicUsize::new(0));
     let last_reported_percent = Arc::new(AtomicUsize::new(0));
+    let background_analysis = background_analysis_for_mode(ascii_chars, cell_color_mode)?;
 
     // Report initial progress
     progress_callback(Progress::converting_frames(0, total));
@@ -323,7 +362,7 @@ pub(crate) fn convert_directory_parallel_with_detailed_progress<F>(src_dir: &Pat
     pngs.par_iter().try_for_each(|img_path| -> Result<()> {
         let file_stem = img_path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| anyhow!("bad file name"))?;
         let out_txt = dst_dir.join(format!("{}.txt", file_stem));
-        convert_image_to_ascii(img_path, &out_txt, font_ratio, threshold, None, ascii_chars, output_mode, cell_color_mode)?;
+        convert_image_to_ascii_with_analysis(img_path, &out_txt, font_ratio, threshold, None, ascii_chars, output_mode, cell_color_mode, background_analysis.as_ref())?;
 
         // Update progress - throttle to only report every 1% change
         let current = completed.fetch_add(1, Ordering::SeqCst) + 1;

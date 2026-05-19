@@ -9,31 +9,16 @@ use walkdir::WalkDir;
 pub fn run_find_loop(dir: &Path) -> Result<()> {
     // Load frames in order
     let mut frames: Vec<(usize, String)> = Vec::new();
-    let mut entries: Vec<std::path::PathBuf> = WalkDir::new(dir)
-        .min_depth(1)
-        .max_depth(1)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .map(|e| e.into_path())
-        .filter(|p| p.extension().map(|e| e == "txt").unwrap_or(false))
-        .collect();
+    let mut entries: Vec<std::path::PathBuf> = WalkDir::new(dir).min_depth(1).max_depth(1).into_iter().filter_map(|e| e.ok()).map(|e| e.into_path()).filter(|p| p.extension().map(|e| e == "txt").unwrap_or(false)).collect();
     entries.sort();
 
     for p in entries {
-        let name = p
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_string();
+        let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string();
         if !name.starts_with("frame_") {
             continue;
         }
         // parse frame number
-        let num = name
-            .trim_start_matches("frame_")
-            .trim_end_matches(".txt")
-            .parse::<usize>()
-            .unwrap_or(frames.len());
+        let num = name.trim_start_matches("frame_").trim_end_matches(".txt").parse::<usize>().unwrap_or(frames.len());
         let content = fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))?;
         frames.push((num, content));
     }
@@ -95,49 +80,26 @@ pub fn run_find_loop(dir: &Path) -> Result<()> {
 
     println!("Found loops:");
     for (i, (s, e)) in loops.iter().enumerate() {
-        println!(
-            "{}: frames {}..{} (inclusive start, exclusive end)",
-            i + 1,
-            frames[*s].0,
-            frames[*e].0
-        );
+        println!("{}: frames {}..{} (inclusive start, exclusive end)", i + 1, frames[*s].0, frames[*e].0);
     }
 
     // Interactive menu
     loop {
         let choices = vec!["Export loop", "Repeat loop", "Quit"];
-        let sel = Select::new()
-            .with_prompt("Choose an action")
-            .default(0)
-            .items(&choices)
-            .interact()?;
+        let sel = Select::new().with_prompt("Choose an action").default(0).items(&choices).interact()?;
         match sel {
             0 => {
                 // Export
-                let labels: Vec<String> = loops
-                    .iter()
-                    .map(|(s, e)| format!("{}..{}", frames[*s].0, frames[*e].0))
-                    .collect();
-                let idx = Select::new()
-                    .with_prompt("Select loop to export")
-                    .default(0)
-                    .items(&labels)
-                    .interact()?;
+                let labels: Vec<String> = loops.iter().map(|(s, e)| format!("{}..{}", frames[*s].0, frames[*e].0)).collect();
+                let idx = Select::new().with_prompt("Select loop to export").default(0).items(&labels).interact()?;
                 let (s, e) = loops[idx];
                 export_loop(dir, &frames, s, e)?;
                 println!("Exported loop {}..{}", frames[s].0, frames[e].0);
             }
             1 => {
                 // Repeat
-                let labels: Vec<String> = loops
-                    .iter()
-                    .map(|(s, e)| format!("{}..{}", frames[*s].0, frames[*e].0))
-                    .collect();
-                let idx = Select::new()
-                    .with_prompt("Select loop to repeat")
-                    .default(0)
-                    .items(&labels)
-                    .interact()?;
+                let labels: Vec<String> = loops.iter().map(|(s, e)| format!("{}..{}", frames[*s].0, frames[*e].0)).collect();
+                let idx = Select::new().with_prompt("Select loop to repeat").default(0).items(&labels).interact()?;
                 let (s, e) = loops[idx];
                 repeat_loop(dir, &frames, s, e)?;
                 println!("Loop repeated");
@@ -152,12 +114,7 @@ pub fn run_find_loop(dir: &Path) -> Result<()> {
 fn export_loop(dir: &Path, frames: &[(usize, String)], start_idx: usize, end_idx: usize) -> Result<()> {
     let start_frame = frames[start_idx].0;
     let end_frame = frames[end_idx].0;
-    let out = dir.with_file_name(format!(
-        "{}_loop_{}_{}",
-        dir.file_name().and_then(|s| s.to_str()).unwrap_or("frames"),
-        start_frame,
-        end_frame
-    ));
+    let out = dir.with_file_name(format!("{}_loop_{}_{}", dir.file_name().and_then(|s| s.to_str()).unwrap_or("frames"), start_frame,end_frame));
     fs::create_dir_all(&out)?;
     for (counter, frame) in frames.iter().take(end_idx + 1).skip(start_idx).enumerate() {
         // inclusive both ends as per example ABCD A
@@ -183,12 +140,7 @@ fn repeat_loop(dir: &Path, frames: &[(usize, String)], start_idx: usize, end_idx
 
     // Write back with new numbering
     // First, remove existing frame_*.txt
-    for entry in WalkDir::new(dir)
-        .min_depth(1)
-        .max_depth(1)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
+    for entry in WalkDir::new(dir).min_depth(1).max_depth(1).into_iter().filter_map(|e| e.ok()) {
         let p = entry.path().to_path_buf();
         if p.is_file() {
             if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
