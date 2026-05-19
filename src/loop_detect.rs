@@ -159,12 +159,10 @@ fn export_loop(dir: &Path, frames: &[(usize, String)], start_idx: usize, end_idx
         end_frame
     ));
     fs::create_dir_all(&out)?;
-    let mut counter: usize = 1;
-    for frame in frames.iter().take(end_idx + 1).skip(start_idx) {
+    for (counter, frame) in frames.iter().take(end_idx + 1).skip(start_idx).enumerate() {
         // inclusive both ends as per example ABCD A
-        let filename = out.join(format!("frame_{:04}.txt", counter));
+        let filename = out.join(format!("frame_{:04}.txt", counter + 1));
         fs::write(filename, &frame.1)?;
-        counter += 1;
     }
     Ok(())
 }
