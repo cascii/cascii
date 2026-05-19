@@ -31,6 +31,7 @@ pub(crate) fn image_to_ascii_frame_data(img_path: &Path, font_ratio: f32, thresh
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn convert_image_to_ascii(img_path: &Path, out_txt: &Path, font_ratio: f32, threshold: u8, columns: Option<u32>, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode) -> Result<()> {
     match output_mode {
         OutputMode::TextOnly => {
@@ -125,15 +126,27 @@ pub(crate) fn image_to_ascii_with_colors(img_path: &Path, font_ratio: f32, thres
     Ok((out, w, h, rgb_data))
 }
 
-/// Combined binary format (.cframe): text + color in one file.
-/// Header (8 bytes): width (u32 LE) + height (u32 LE)
-/// Body (width * height * 4 bytes): for each character position (row-major):
-///   char (u8) + r (u8) + g (u8) + b (u8)
-/// Optional trailing payload (width * height * 3 bytes):
-///   background r (u8) + g (u8) + b (u8) for each character position
+/// Trailing payload flag bits.
 ///
-/// The trailing background payload keeps the legacy header/body layout intact,
-/// so older readers can still parse the foreground data and ignore the extra bytes.
+/// Stored as the first byte of the optional extension area that follows the
+/// legacy `8 + w*h*4` block. Each bit announces an optional payload that
+/// follows in a fixed order (lowest bit = earliest payload). Adding a new
+/// payload is a forward-compatible change as long as the new bit is appended.
+pub(crate) const CFRAME_EXT_FLAG_HAS_BG: u8 = 0b0000_0001;
+
+/// Combined binary format (.cframe): text + color in one file.
+///
+/// Layout:
+/// 1. Header (8 bytes): `width: u32 LE` + `height: u32 LE`
+/// 2. Body (`width * height * 4` bytes): `char: u8 + r: u8 + g: u8 + b: u8` per cell, row-major
+/// 3. Optional extension area:
+///    - `flags: u8` — bit 0 (`CFRAME_EXT_FLAG_HAS_BG`) announces a background payload
+///    - if `flags & HAS_BG`: `width * height * 3` bytes of background RGB, row-major
+///
+/// Older readers that don't know about the extension still parse the body
+/// correctly and ignore the trailing bytes. New readers detect the extension
+/// by looking past the legacy body for the `flags` byte instead of inferring
+/// payload presence from total file length.
 pub(crate) fn write_cframe_binary(width: u32, height: u32, ascii_content: &str, rgb_data: &[u8], bg_rgb_data: Option<&[u8]>, path: &Path) -> Result<()> {
     use std::io::Write;
     let mut file = fs::File::create(path).with_context(|| format!("creating cframe file {}", path.display()))?;
@@ -150,12 +163,18 @@ pub(crate) fn write_cframe_binary(width: u32, height: u32, ascii_content: &str, 
         char_idx += 1;
     }
     if let Some(bg_rgb_data) = bg_rgb_data {
+        file.write_all(&[CFRAME_EXT_FLAG_HAS_BG])?;
         file.write_all(bg_rgb_data)?;
     }
     Ok(())
 }
 
-/// Read a .cframe binary file into AsciiFrameData
+/// Read a .cframe binary file into AsciiFrameData.
+///
+/// Recognises both the legacy fg-only layout and the new extension area. For
+/// backward compatibility with `.cframe` files written by older builds that
+/// appended the background payload **without** a leading flag byte, the reader
+/// also accepts an exact `width * height * 3` trailing block.
 pub(crate) fn read_cframe_to_frame_data(path: &Path) -> Result<AsciiFrameData> {
     let data = fs::read(path).with_context(|| format!("reading cframe {}", path.display()))?;
     if data.len() < 8 {
@@ -187,10 +206,18 @@ pub(crate) fn read_cframe_to_frame_data(path: &Path) -> Result<AsciiFrameData> {
         ascii_text.push('\n');
     }
 
-    let bg_offset = 8 + expected_body;
+    let ext_offset = 8 + expected_body;
     let expected_bg_len = cell_count * 3;
-    if data.len() >= bg_offset + expected_bg_len {
-        bg_rgb_colors.extend_from_slice(&data[bg_offset..bg_offset + expected_bg_len]);
+    if data.len() > ext_offset {
+        let trailing = data.len() - ext_offset;
+        if trailing > expected_bg_len && (data[ext_offset] & CFRAME_EXT_FLAG_HAS_BG) != 0 {
+            // New format: leading flag byte announces the bg payload.
+            let bg_start = ext_offset + 1;
+            bg_rgb_colors.extend_from_slice(&data[bg_start..bg_start + expected_bg_len]);
+        } else if trailing == expected_bg_len {
+            // Legacy bg-augmented format: exact bg-sized trailing block, no flag byte.
+            bg_rgb_colors.extend_from_slice(&data[ext_offset..ext_offset + expected_bg_len]);
+        }
     }
 
     Ok(AsciiFrameData {ascii_text, width_chars: width, height_chars: height, rgb_colors, bg_rgb_colors})
@@ -236,6 +263,7 @@ fn char_for(luma: u8, threshold: u8, ascii_chars: &[u8]) -> char {
     ascii_chars[idx] as char
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn convert_directory_parallel(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode) -> Result<usize> {
     convert_directory_parallel_with_progress(src_dir, dst_dir, font_ratio, threshold, keep_images, ascii_chars, output_mode, cell_color_mode, None::<fn(usize, usize)>)
 }
@@ -299,11 +327,7 @@ pub(crate) fn convert_directory_parallel_with_detailed_progress<F>(src_dir: &Pat
 
         // Update progress - throttle to only report every 1% change
         let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
-        let current_percent = if total > 0 {
-            (current * 100) / total
-        } else {
-            0
-        };
+        let current_percent = current.checked_mul(100).and_then(|value| value.checked_div(total)).unwrap_or(0);
         let last_percent = last_reported_percent.load(Ordering::SeqCst);
 
         // Only report if percentage changed (throttle to ~100 updates max)
@@ -322,4 +346,79 @@ pub(crate) fn convert_directory_parallel_with_detailed_progress<F>(src_dir: &Pat
     }
 
     Ok(total)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    fn ascii_content_for(width: u32, height: u32, chars: &[u8]) -> String {
+        let mut out = String::with_capacity(((width as usize) + 1) * height as usize);
+        for row in 0..height as usize {
+            let start = row * width as usize;
+            let end = start + width as usize;
+            for &b in &chars[start..end] {
+                out.push(b as char);
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    #[test]
+    fn cframe_round_trip_without_background() {
+        let chars = [b'A', b'B', b'C', b'D'];
+        let rgb = vec![255, 0, 0, 0, 255, 0, 0, 0, 255, 128, 128, 128];
+        let text = ascii_content_for(2, 2, &chars);
+
+        let tmp = NamedTempFile::new().unwrap();
+        write_cframe_binary(2, 2, &text, &rgb, None, tmp.path()).unwrap();
+
+        let frame = read_cframe_to_frame_data(tmp.path()).unwrap();
+        assert_eq!(frame.width_chars, 2);
+        assert_eq!(frame.height_chars, 2);
+        assert_eq!(frame.rgb_colors, rgb);
+        assert!(frame.bg_rgb_colors.is_empty());
+    }
+
+    #[test]
+    fn cframe_round_trip_with_background_uses_flag_byte() {
+        let chars = [b'X', b'Y'];
+        let rgb = vec![10, 20, 30, 40, 50, 60];
+        let bg = vec![100, 110, 120, 130, 140, 150];
+        let text = ascii_content_for(2, 1, &chars);
+
+        let tmp = NamedTempFile::new().unwrap();
+        write_cframe_binary(2, 1, &text, &rgb, Some(&bg), tmp.path()).unwrap();
+
+        // 8-byte header + 8-byte body + 1 flag byte + 6 bg bytes = 23 bytes.
+        let raw = fs::read(tmp.path()).unwrap();
+        assert_eq!(raw.len(), 8 + 8 + 1 + 6);
+        assert_eq!(raw[16], CFRAME_EXT_FLAG_HAS_BG);
+
+        let frame = read_cframe_to_frame_data(tmp.path()).unwrap();
+        assert_eq!(frame.rgb_colors, rgb);
+        assert_eq!(frame.bg_rgb_colors, bg);
+    }
+
+    #[test]
+    fn cframe_reads_legacy_bg_without_flag_byte() {
+        // Simulate a file written by the pre-flag-byte build: no leading flag,
+        // bg payload appended directly after the body.
+        let header: Vec<u8> = [2u32.to_le_bytes(), 1u32.to_le_bytes()].concat();
+        let body: Vec<u8> = vec![b'X', 10, 20, 30, b'Y', 40, 50, 60];
+        let bg: Vec<u8> = vec![100, 110, 120, 130, 140, 150];
+        let mut file_bytes = Vec::new();
+        file_bytes.extend_from_slice(&header);
+        file_bytes.extend_from_slice(&body);
+        file_bytes.extend_from_slice(&bg);
+
+        let tmp = NamedTempFile::new().unwrap();
+        fs::write(tmp.path(), &file_bytes).unwrap();
+
+        let frame = read_cframe_to_frame_data(tmp.path()).unwrap();
+        assert_eq!(frame.rgb_colors, vec![10, 20, 30, 40, 50, 60]);
+        assert_eq!(frame.bg_rgb_colors, bg);
+    }
 }

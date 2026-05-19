@@ -1015,11 +1015,7 @@ impl AsciiConverter {
                 }
 
                 let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
-                let current_percent = if total_frames > 0 {
-                    (current * 100) / total_frames
-                } else {
-                    0
-                };
+                let current_percent = current.checked_mul(100).and_then(|value| value.checked_div(total_frames)).unwrap_or(0);
                 let last_percent = if current > 1 {
                     ((current - 1) * 100) / total_frames
                 } else {
@@ -1177,11 +1173,7 @@ impl AsciiConverter {
                 }
 
                 let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
-                let current_percent = if total_frames > 0 {
-                    (current * 100) / total_frames
-                } else {
-                    0
-                };
+                let current_percent = current.checked_mul(100).and_then(|value| value.checked_div(total_frames)).unwrap_or(0);
                 let last_percent = if current > 1 {
                     ((current - 1) * 100) / total_frames
                 } else {

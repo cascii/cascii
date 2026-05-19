@@ -453,8 +453,8 @@ fn main() -> Result<()> {
         OutputMode::TextOnly
     };
 
-    if args.fit_cell_backgrounds && !args.to_video {
-        return Err(anyhow!("--fit-cell-backgrounds currently requires --to-video because background colors are not persisted in .cframe yet"));
+    if args.fit_cell_backgrounds && matches!(output_mode, OutputMode::TextOnly) && !args.to_video {
+        eprintln!("warning: --fit-cell-backgrounds has no effect with text-only output; pass --colors or --to-video to use the generated backgrounds.");
     }
 
     // Create conversion options
@@ -613,7 +613,7 @@ fn main() -> Result<()> {
     } else if input_path.is_dir() {
         if args.to_video {
             if args.fit_cell_backgrounds {
-                return Err(anyhow!("--fit-cell-backgrounds currently only works when converting a source video directly to video, not when rendering an existing frame directory"));
+                eprintln!("note: --fit-cell-backgrounds is a conversion-time flag and has no effect when rendering an existing frame directory; backgrounds already stored in .cframe files are preserved automatically.");
             }
             let to_video_opts = ToVideoOptions {output_path: video_output_path.clone(), font_size: args.video_font_size, crf: args.crf, mux_audio: args.audio, use_colors: None};
             let progress_bar: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
