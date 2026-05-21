@@ -4,6 +4,7 @@ use image::{DynamicImage, Rgb};
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::{Command as ProcCommand, Stdio};
+use std::sync::OnceLock;
 
 use crate::convert::AsciiFrameData;
 use crate::FfmpegConfig;
@@ -11,11 +12,17 @@ use crate::FfmpegConfig;
 /// Embedded monospace font for video rendering
 const FONT_DATA: &[u8] = include_bytes!("../resources/DejaVuSansMono.ttf");
 const ANALYSIS_FONT_SIZE: f32 = 16.0;
+static ANALYSIS_GLYPH_ATLAS: OnceLock<std::result::Result<GlyphAtlas, String>> = OnceLock::new();
 
 /// Pre-rasterized bitmap for a single glyph
 struct GlyphBitmap {
     /// Alpha coverage values, row-major, cell_width * cell_height entries
     alpha: Vec<f32>,
+    s_aa: f64,
+    s_ab: f64,
+    s_bb: f64,
+    det: f64,
+    degenerate: bool,
 }
 
 /// Pre-rasterized monospace glyph atlas for fast frame rendering
@@ -26,6 +33,11 @@ pub(crate) struct GlyphAtlas {
     pub(crate) cell_width: u32,
     /// Height of each character cell in pixels
     pub(crate) cell_height: u32,
+}
+
+pub(crate) struct BackgroundAnalysisContext {
+    atlas: &'static GlyphAtlas,
+    candidate_bytes: Vec<u8>,
 }
 
 pub(crate) fn build_glyph_atlas(font_size: f32) -> Result<GlyphAtlas> {
@@ -62,10 +74,42 @@ pub(crate) fn build_glyph_atlas(font_size: f32) -> Result<GlyphAtlas> {
             });
         }
 
-        glyphs.insert(byte, GlyphBitmap { alpha });
+        let mut s_aa = 0.0f64;
+        let mut s_ab = 0.0f64;
+        let mut s_bb = 0.0f64;
+        let mut sum_alpha = 0.0f64;
+        for &value in &alpha {
+            let a = value as f64;
+            let b = 1.0 - a;
+            sum_alpha += a;
+            s_aa += a * a;
+            s_ab += a * b;
+            s_bb += b * b;
+        }
+        let mean_alpha = sum_alpha / alpha.len().max(1) as f64;
+        let det = s_aa * s_bb - s_ab * s_ab;
+        let degenerate = mean_alpha <= 1e-6 || mean_alpha >= 1.0 - 1e-6 || det.abs() <= 1e-9;
+
+        glyphs.insert(byte, GlyphBitmap { alpha, s_aa, s_ab, s_bb, det, degenerate });
     }
 
     Ok(GlyphAtlas {glyphs, cell_width, cell_height})
+}
+
+fn analysis_glyph_atlas() -> Result<&'static GlyphAtlas> {
+    match ANALYSIS_GLYPH_ATLAS.get_or_init(|| build_glyph_atlas(ANALYSIS_FONT_SIZE).map_err(|e| e.to_string())) {
+        Ok(atlas) => Ok(atlas),
+        Err(message) => Err(anyhow!(message.clone())),
+    }
+}
+
+fn candidate_bytes_for_ascii_chars(ascii_chars: &[u8]) -> Vec<u8> {
+    let candidate_bytes: Vec<u8> = ascii_chars.iter().copied().filter(|byte| *byte != b' ').collect();
+    if candidate_bytes.is_empty() { vec![b' '] } else { candidate_bytes }
+}
+
+pub(crate) fn background_analysis_context(ascii_chars: &[u8]) -> Result<BackgroundAnalysisContext> {
+    Ok(BackgroundAnalysisContext { atlas: analysis_glyph_atlas()?, candidate_bytes: candidate_bytes_for_ascii_chars(ascii_chars) })
 }
 
 pub(crate) fn render_ascii_frame_to_rgb(frame: &AsciiFrameData, atlas: &GlyphAtlas, use_colors: bool) -> Vec<u8> {
@@ -152,7 +196,12 @@ pub(crate) fn render_ascii_frame_to_rgb(frame: &AsciiFrameData, atlas: &GlyphAtl
 }
 
 pub(crate) fn fit_image_to_ascii_with_cell_backgrounds(img_path: &Path, font_ratio: f32, threshold: u8, columns: Option<u32>, ascii_chars: &[u8]) -> Result<AsciiFrameData> {
-    let atlas = build_glyph_atlas(ANALYSIS_FONT_SIZE)?;
+    let background_analysis = background_analysis_context(ascii_chars)?;
+    fit_image_to_ascii_with_cell_backgrounds_with_context(img_path, font_ratio, threshold, columns, &background_analysis)
+}
+
+pub(crate) fn fit_image_to_ascii_with_cell_backgrounds_with_context(img_path: &Path, font_ratio: f32, threshold: u8, columns: Option<u32>, background_analysis: &BackgroundAnalysisContext) -> Result<AsciiFrameData> {
+    let atlas = background_analysis.atlas;
     let mut img = image::open(img_path).with_context(|| format!("opening {}", img_path.display()))?.to_rgb8();
 
     let (orig_w, orig_h) = img.dimensions();
@@ -171,8 +220,6 @@ pub(crate) fn fit_image_to_ascii_with_cell_backgrounds(img_path: &Path, font_rat
         img = dyn_img.resize_exact(target_w, target_h, image::imageops::FilterType::Lanczos3).to_rgb8();
     }
 
-    let candidate_bytes: Vec<u8> = ascii_chars.iter().copied().filter(|byte| *byte != b' ').collect();
-    let candidate_bytes = if candidate_bytes.is_empty() { vec![b' '] } else { candidate_bytes };
     let cell_pixels = (atlas.cell_width * atlas.cell_height) as usize;
     let mut ascii_text = String::with_capacity((width_chars as usize + 1) * height_chars as usize);
     let mut rgb_colors = Vec::with_capacity((width_chars * height_chars * 3) as usize);
@@ -185,11 +232,15 @@ pub(crate) fn fit_image_to_ascii_with_cell_backgrounds(img_path: &Path, font_rat
             let base_y = row * atlas.cell_height;
             let mut patch_index = 0usize;
             let mut total_luma = 0.0f64;
+            let mut sum_rgb = [0u64; 3];
 
             for py in 0..atlas.cell_height {
                 for px in 0..atlas.cell_width {
                     let pixel = *img.get_pixel(base_x + px, base_y + py);
                     total_luma += luminance(pixel) as f64;
+                    sum_rgb[0] += pixel[0] as u64;
+                    sum_rgb[1] += pixel[1] as u64;
+                    sum_rgb[2] += pixel[2] as u64;
                     patch[patch_index] = pixel;
                     patch_index += 1;
                 }
@@ -203,15 +254,15 @@ pub(crate) fn fit_image_to_ascii_with_cell_backgrounds(img_path: &Path, font_rat
                 continue;
             }
 
-            let avg_rgb = average_rgb(&patch);
+            let avg_rgb = [(sum_rgb[0] / cell_pixels as u64) as u8, (sum_rgb[1] / cell_pixels as u64) as u8, (sum_rgb[2] / cell_pixels as u64) as u8];
             let mut best_byte = b' ';
             let mut best_fg = avg_rgb;
             let mut best_bg = avg_rgb;
             let mut best_error = f64::INFINITY;
 
-            for &byte in &candidate_bytes {
+            for &byte in &background_analysis.candidate_bytes {
                 if let Some(glyph) = atlas.glyphs.get(&byte) {
-                    let (fg, bg, error) = fit_colors_for_glyph(&patch, &glyph.alpha);
+                    let (fg, bg, error) = fit_colors_for_glyph(&patch, glyph, avg_rgb);
                     if error < best_error {
                         best_byte = byte;
                         best_fg = fg;
@@ -235,37 +286,8 @@ fn blend_channel(background: u8, foreground: u8, alpha: f32) -> u8 {
     ((background as f32 * (1.0 - alpha)) + (foreground as f32 * alpha)).round().clamp(0.0, 255.0) as u8
 }
 
-fn average_rgb(patch: &[Rgb<u8>]) -> [u8; 3] {
-    let mut sum = [0u64; 3];
-    for pixel in patch {
-        sum[0] += pixel[0] as u64;
-        sum[1] += pixel[1] as u64;
-        sum[2] += pixel[2] as u64;
-    }
-    let len = patch.len().max(1) as u64;
-    [(sum[0] / len) as u8, (sum[1] / len) as u8, (sum[2] / len) as u8]
-}
-
-fn fit_colors_for_glyph(patch: &[Rgb<u8>], alpha: &[f32]) -> ([u8; 3], [u8; 3], f64) {
-    let avg_rgb = average_rgb(patch);
-    let mean_alpha = alpha.iter().map(|value| *value as f64).sum::<f64>() / alpha.len().max(1) as f64;
-    if mean_alpha <= 1e-6 || mean_alpha >= 1.0 - 1e-6 {
-        return (avg_rgb, avg_rgb, constant_patch_error(patch, avg_rgb));
-    }
-
-    let mut s_aa = 0.0f64;
-    let mut s_ab = 0.0f64;
-    let mut s_bb = 0.0f64;
-    for &value in alpha {
-        let a = value as f64;
-        let b = 1.0 - a;
-        s_aa += a * a;
-        s_ab += a * b;
-        s_bb += b * b;
-    }
-
-    let det = s_aa * s_bb - s_ab * s_ab;
-    if det.abs() <= 1e-9 {
+fn fit_colors_for_glyph(patch: &[Rgb<u8>], glyph: &GlyphBitmap, avg_rgb: [u8; 3]) -> ([u8; 3], [u8; 3], f64) {
+    if glyph.degenerate {
         return (avg_rgb, avg_rgb, constant_patch_error(patch, avg_rgb));
     }
 
@@ -274,7 +296,7 @@ fn fit_colors_for_glyph(patch: &[Rgb<u8>], alpha: &[f32]) -> ([u8; 3], [u8; 3], 
     for channel in 0..3 {
         let mut s_ap = 0.0f64;
         let mut s_bp = 0.0f64;
-        for (pixel, &value) in patch.iter().zip(alpha.iter()) {
+        for (pixel, &value) in patch.iter().zip(glyph.alpha.iter()) {
             let a = value as f64;
             let b = 1.0 - a;
             let p = pixel[channel] as f64;
@@ -282,14 +304,14 @@ fn fit_colors_for_glyph(patch: &[Rgb<u8>], alpha: &[f32]) -> ([u8; 3], [u8; 3], 
             s_bp += b * p;
         }
 
-        let fg_value = ((s_ap * s_bb) - (s_bp * s_ab)) / det;
-        let bg_value = ((s_bp * s_aa) - (s_ap * s_ab)) / det;
+        let fg_value = ((s_ap * glyph.s_bb) - (s_bp * glyph.s_ab)) / glyph.det;
+        let bg_value = ((s_bp * glyph.s_aa) - (s_ap * glyph.s_ab)) / glyph.det;
         fg[channel] = fg_value.clamp(0.0, 255.0).round() as u8;
         bg[channel] = bg_value.clamp(0.0, 255.0).round() as u8;
     }
 
     let mut error = 0.0f64;
-    for (pixel, &value) in patch.iter().zip(alpha.iter()) {
+    for (pixel, &value) in patch.iter().zip(glyph.alpha.iter()) {
         let a = value as f64;
         let b = 1.0 - a;
         for channel in 0..3 {

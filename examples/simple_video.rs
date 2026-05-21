@@ -33,13 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Output: {}", output_dir.display());
         println!("Settings: {}fps, {}s duration", video_opts.fps, 2);
 
-        converter.convert_video(
-            input,
-            output_dir,
-            &video_opts,
-            &conv_opts,
-            false, // Don't keep intermediate PNG files
-        )?;
+        converter.convert_video(input, output_dir, &video_opts, &conv_opts, false)?;
 
         println!("✓ Video conversion complete!");
         println!("ASCII frames saved to {}", output_dir.display());
