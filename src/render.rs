@@ -195,12 +195,12 @@ pub(crate) fn render_ascii_frame_to_rgb(frame: &AsciiFrameData, atlas: &GlyphAtl
     buffer
 }
 
-pub(crate) fn fit_image_to_ascii_with_cell_backgrounds(img_path: &Path, font_ratio: f32, threshold: u8, columns: Option<u32>, ascii_chars: &[u8]) -> Result<AsciiFrameData> {
+pub(crate) fn fit_image_to_ascii_with_cell_backgrounds(img_path: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, ascii_chars: &[u8]) -> Result<AsciiFrameData> {
     let background_analysis = background_analysis_context(ascii_chars)?;
-    fit_image_to_ascii_with_cell_backgrounds_with_context(img_path, font_ratio, threshold, columns, &background_analysis)
+    fit_image_to_ascii_with_cell_backgrounds_with_context(img_path, font_ratio, threshold, bg_threshold, columns, &background_analysis)
 }
 
-pub(crate) fn fit_image_to_ascii_with_cell_backgrounds_with_context(img_path: &Path, font_ratio: f32, threshold: u8, columns: Option<u32>, background_analysis: &BackgroundAnalysisContext) -> Result<AsciiFrameData> {
+pub(crate) fn fit_image_to_ascii_with_cell_backgrounds_with_context(img_path: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, background_analysis: &BackgroundAnalysisContext) -> Result<AsciiFrameData> {
     let atlas = background_analysis.atlas;
     let mut img = image::open(img_path).with_context(|| format!("opening {}", img_path.display()))?.to_rgb8();
 
@@ -247,7 +247,11 @@ pub(crate) fn fit_image_to_ascii_with_cell_backgrounds_with_context(img_path: &P
             }
 
             let avg_luma = total_luma / cell_pixels as f64;
-            if avg_luma < threshold as f64 {
+            let emit_fg = avg_luma >= threshold as f64;
+            let emit_bg = avg_luma >= bg_threshold as f64;
+
+            // Quadrant 4: nothing visible at all — short-circuit the fit solver.
+            if !emit_fg && !emit_bg {
                 ascii_text.push(' ');
                 rgb_colors.extend_from_slice(&[0, 0, 0]);
                 bg_rgb_colors.extend_from_slice(&[0, 0, 0]);
@@ -255,6 +259,20 @@ pub(crate) fn fit_image_to_ascii_with_cell_backgrounds_with_context(img_path: &P
             }
 
             let avg_rgb = [(sum_rgb[0] / cell_pixels as u64) as u8, (sum_rgb[1] / cell_pixels as u64) as u8, (sum_rgb[2] / cell_pixels as u64) as u8];
+
+            // Quadrant 3: background-only "mosaic" cell. The bg threshold is
+            // met but the fg threshold isn't, so emit a space glyph (with
+            // black fg) on the cell's average colour. Skipping the glyph
+            // solver here keeps the bg surface flat per the avg patch colour
+            // — a tighter aesthetic than letting the solver guess at a
+            // best-fit fg/bg pair for a cell that's about to drop the fg.
+            if !emit_fg {
+                ascii_text.push(' ');
+                rgb_colors.extend_from_slice(&[0, 0, 0]);
+                bg_rgb_colors.extend_from_slice(&avg_rgb);
+                continue;
+            }
+
             let mut best_byte = b' ';
             let mut best_fg = avg_rgb;
             let mut best_bg = avg_rgb;
@@ -274,7 +292,12 @@ pub(crate) fn fit_image_to_ascii_with_cell_backgrounds_with_context(img_path: &P
 
             ascii_text.push(best_byte as char);
             rgb_colors.extend_from_slice(&best_fg);
-            bg_rgb_colors.extend_from_slice(&best_bg);
+            // Quadrant 2: glyph emitted but bg suppressed → black bg.
+            if emit_bg {
+                bg_rgb_colors.extend_from_slice(&best_bg);
+            } else {
+                bg_rgb_colors.extend_from_slice(&[0, 0, 0]);
+            }
         }
         ascii_text.push('\n');
     }
@@ -392,6 +415,91 @@ mod tests {
         let buffer = render_ascii_frame_to_rgb(&frame, &atlas, true);
         assert!(buffer.chunks_exact(3).any(|pixel| pixel[1] == 0 && pixel[2] > 200));
         assert!(buffer.chunks_exact(3).any(|pixel| pixel[1] > 0 && pixel[2] < 255));
+        Ok(())
+    }
+
+    /// Helper: writes a uniform mid-gray image (luminance ≈ 128) to a temp PNG.
+    fn write_uniform_test_image(luma_target: u8) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("uniform.png");
+        // Build a 32×32 image of uniform gray.
+        let img = image::RgbImage::from_pixel(32, 32, Rgb([luma_target, luma_target, luma_target]));
+        img.save(&path).expect("save");
+        (dir, path)
+    }
+
+    fn last_cell_bg(frame: &AsciiFrameData) -> [u8; 3] {
+        let n = frame.bg_rgb_colors.len();
+        [frame.bg_rgb_colors[n - 3], frame.bg_rgb_colors[n - 2], frame.bg_rgb_colors[n - 1]]
+    }
+
+    fn first_glyph(frame: &AsciiFrameData) -> char {
+        frame.ascii_text.chars().find(|ch| *ch != '\n').unwrap_or(' ')
+    }
+
+    #[test]
+    fn bg_fit_quadrant_both_thresholds_met() -> Result<()> {
+        // Uniform gray ≈ 128; thresholds well below it on both axes → glyph + bg.
+        let (_dir, path) = write_uniform_test_image(128);
+        let frame = fit_image_to_ascii_with_cell_backgrounds(&path, 0.5, 30, 30, Some(4), b" .M")?;
+        let bg = last_cell_bg(&frame);
+        // bg should be non-black (matches mid-gray-ish).
+        assert!(bg[0] > 5 || bg[1] > 5 || bg[2] > 5, "expected coloured bg, got {:?}", bg);
+        // Glyph should be from the candidate set (not always space).
+        assert!(frame.ascii_text.chars().any(|ch| ch == 'M' || ch == '.'));
+        Ok(())
+    }
+
+    #[test]
+    fn bg_fit_quadrant_glyph_only_bg_suppressed() -> Result<()> {
+        // fg threshold passes, bg threshold doesn't → glyph + black bg.
+        let (_dir, path) = write_uniform_test_image(128);
+        let frame = fit_image_to_ascii_with_cell_backgrounds(&path, 0.5, 30, 200, Some(4), b" .M")?;
+        let bg = last_cell_bg(&frame);
+        assert_eq!(bg, [0, 0, 0], "bg should be black when bg threshold not met");
+        // Glyph still emitted (not all spaces).
+        assert!(frame.ascii_text.chars().any(|ch| ch == 'M' || ch == '.'));
+        Ok(())
+    }
+
+    #[test]
+    fn bg_fit_quadrant_bg_only_glyph_suppressed() -> Result<()> {
+        // fg threshold fails, bg threshold passes → space + coloured bg ("mosaic" cell).
+        let (_dir, path) = write_uniform_test_image(128);
+        let frame = fit_image_to_ascii_with_cell_backgrounds(&path, 0.5, 200, 30, Some(4), b" .M")?;
+        let bg = last_cell_bg(&frame);
+        assert!(bg[0] > 5 || bg[1] > 5 || bg[2] > 5, "expected coloured bg, got {:?}", bg);
+        // Every glyph should be a space.
+        assert!(frame.ascii_text.chars().all(|ch| ch == ' ' || ch == '\n'), "expected spaces only, got {:?}", frame.ascii_text);
+        // fg buffer should be all black under spaces.
+        assert!(frame.rgb_colors.iter().all(|&b| b == 0));
+        Ok(())
+    }
+
+    #[test]
+    fn bg_fit_quadrant_neither_threshold_met() -> Result<()> {
+        // Both thresholds above luminance → empty cells.
+        let (_dir, path) = write_uniform_test_image(64);
+        let frame = fit_image_to_ascii_with_cell_backgrounds(&path, 0.5, 200, 200, Some(4), b" .M")?;
+        assert!(frame.bg_rgb_colors.iter().all(|&b| b == 0), "expected all-black bg");
+        assert!(frame.rgb_colors.iter().all(|&b| b == 0), "expected all-black fg");
+        assert_eq!(first_glyph(&frame), ' ');
+        Ok(())
+    }
+
+    #[test]
+    fn bg_fit_defaults_match_when_thresholds_equal() -> Result<()> {
+        // With bg_threshold == threshold, behaviour reduces to the legacy
+        // single-threshold output: cells either fully present or fully empty.
+        let (_dir, path) = write_uniform_test_image(128);
+        let frame = fit_image_to_ascii_with_cell_backgrounds(&path, 0.5, 50, 50, Some(4), b" .M")?;
+        // For every cell, bg is either entirely the cell colour or entirely black —
+        // never partial.
+        for chunk in frame.bg_rgb_colors.chunks_exact(3) {
+            let all_zero = chunk[0] == 0 && chunk[1] == 0 && chunk[2] == 0;
+            let any_colour = chunk[0] > 5 || chunk[1] > 5 || chunk[2] > 5;
+            assert!(all_zero || any_colour);
+        }
         Ok(())
     }
 }

@@ -127,6 +127,12 @@ struct Args {
     #[arg(long, default_value_t = false)]
     fit_cell_backgrounds: bool,
 
+    /// Override the luminance threshold used for the per-cell background pass.
+    /// Defaults to the foreground `--luminance` value. Only effective when
+    /// `--fit-cell-backgrounds` is also set.
+    #[arg(long)]
+    bg_luminance: Option<u8>,
+
     /// Extract audio from video to audio.mp3
     #[arg(long, default_value_t = false)]
     audio: bool,
@@ -462,6 +468,7 @@ fn main() -> Result<()> {
         columns: Some(columns),
         font_ratio,
         luminance,
+        bg_luminance: args.bg_luminance,
         ascii_chars: cfg.ascii_chars.clone(),
         output_mode: output_mode.clone(),
         cell_color_mode: if args.fit_cell_backgrounds { CellColorMode::FitForegroundBackground } else { CellColorMode::ForegroundOnly },
@@ -664,7 +671,7 @@ fn main() -> Result<()> {
                 OutputMode::TextAndColor => "text+color",
             };
 
-            let result = cascii::ConversionResult {frame_count, columns, font_ratio, luminance, fps: None, output_mode: mode_str.to_string(), audio_extracted: false, output_dir: output_path.clone(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds: args.fit_cell_backgrounds};
+            let result = cascii::ConversionResult {frame_count, columns, font_ratio, luminance, fps: None, output_mode: mode_str.to_string(), audio_extracted: false, output_dir: output_path.clone(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds: args.fit_cell_backgrounds, bg_luminance: args.bg_luminance.unwrap_or(luminance)};
 
             result.write_details_file().context("writing details file")?;
             let details = result.to_details_string();
