@@ -110,18 +110,12 @@ impl FfmpegConfig {
 
     /// Get the ffmpeg command name or path
     pub(crate) fn ffmpeg_cmd(&self) -> &OsStr {
-        self.ffmpeg_path
-            .as_ref()
-            .map(|p| p.as_os_str())
-            .unwrap_or(OsStr::new("ffmpeg"))
+        self.ffmpeg_path.as_ref().map(|p| p.as_os_str()).unwrap_or(OsStr::new("ffmpeg"))
     }
 
     /// Get the ffprobe command name or path
     pub(crate) fn ffprobe_cmd(&self) -> &OsStr {
-        self.ffprobe_path
-            .as_ref()
-            .map(|p| p.as_os_str())
-            .unwrap_or(OsStr::new("ffprobe"))
+        self.ffprobe_path.as_ref().map(|p| p.as_os_str()).unwrap_or(OsStr::new("ffprobe"))
     }
 }
 
@@ -161,13 +155,7 @@ pub struct Progress {
 impl Progress {
     /// Create a new progress update for extracting frames
     pub fn extracting_frames() -> Self {
-        Self {
-            phase: ProgressPhase::ExtractingFrames,
-            completed: 0,
-            total: 0,
-            percentage: 0.0,
-            message: "Extracting frames from video...".to_string(),
-        }
+        Self {phase: ProgressPhase::ExtractingFrames, completed: 0, total: 0, percentage: 0.0, message: "Extracting frames from video...".to_string()}
     }
 
     /// Create a progress update for extracting frames with percentage
@@ -177,24 +165,12 @@ impl Progress {
         } else {
             0.0
         };
-        Self {
-            phase: ProgressPhase::ExtractingFrames,
-            completed: current_time_us as usize,
-            total: total_duration_us as usize,
-            percentage,
-            message: format!("Extracting frames: {:.1}%", percentage),
-        }
+        Self {phase: ProgressPhase::ExtractingFrames, completed: current_time_us as usize, total: total_duration_us as usize, percentage, message: format!("Extracting frames: {:.1}%", percentage)}
     }
 
     /// Create a new progress update for extracting audio
     pub fn extracting_audio() -> Self {
-        Self {
-            phase: ProgressPhase::ExtractingAudio,
-            completed: 0,
-            total: 0,
-            percentage: 0.0,
-            message: "Extracting audio from video...".to_string(),
-        }
+        Self {phase: ProgressPhase::ExtractingAudio, completed: 0, total: 0, percentage: 0.0, message: "Extracting audio from video...".to_string()}
     }
 
     /// Create a new progress update for frame conversion
@@ -204,13 +180,7 @@ impl Progress {
         } else {
             0.0
         };
-        Self {
-            phase: ProgressPhase::ConvertingFrames,
-            completed,
-            total,
-            percentage,
-            message: format!("Converting frame {} of {}", completed, total),
-        }
+        Self {phase: ProgressPhase::ConvertingFrames, completed, total, percentage, message: format!("Converting frame {} of {}", completed, total)}
     }
 
     /// Create a progress update for rendering video frames
@@ -220,24 +190,12 @@ impl Progress {
         } else {
             0.0
         };
-        Self {
-            phase: ProgressPhase::RenderingVideo,
-            completed,
-            total,
-            percentage,
-            message: format!("Rendering frame {} of {}", completed, total),
-        }
+        Self {phase: ProgressPhase::RenderingVideo, completed, total, percentage, message: format!("Rendering frame {} of {}", completed, total)}
     }
 
     /// Create a completion progress update
     pub fn complete(total_frames: usize) -> Self {
-        Self {
-            phase: ProgressPhase::Complete,
-            completed: total_frames,
-            total: total_frames,
-            percentage: 100.0,
-            message: format!("Conversion complete: {} frames", total_frames),
-        }
+        Self {phase: ProgressPhase::Complete, completed: total_frames, total: total_frames, percentage: 100.0, message: format!("Conversion complete: {} frames", total_frames)}
     }
 }
 
@@ -266,9 +224,7 @@ pub struct ConversionResult {
     pub color: String,
     /// Whether per-cell background fitting was enabled
     pub fit_cell_backgrounds: bool,
-    /// Resolved background luminance threshold actually used by the bg-fit pass.
-    /// Equal to `luminance` unless an explicit override was set via
-    /// `ConversionOptions::with_bg_luminance`.
+    /// Resolved background luminance threshold actually used by the bg-fit pass. Equal to `luminance` unless an explicit override was set via `ConversionOptions::with_bg_luminance`.
     pub bg_luminance: u8,
 }
 
@@ -420,15 +376,7 @@ pub struct ConversionOptions {
 
 impl Default for ConversionOptions {
     fn default() -> Self {
-        Self {
-            columns: Some(400),
-            font_ratio: 0.7,
-            luminance: 20,
-            bg_luminance: None,
-            ascii_chars: default_ascii_chars(),
-            output_mode: OutputMode::TextOnly,
-            cell_color_mode: CellColorMode::ForegroundOnly,
-        }
+        Self {columns: Some(400), font_ratio: 0.7, luminance: 20, bg_luminance: None, ascii_chars: default_ascii_chars(), output_mode: OutputMode::TextOnly, cell_color_mode: CellColorMode::ForegroundOnly}
     }
 }
 
@@ -557,13 +505,7 @@ pub struct ToVideoOptions {
 
 impl Default for ToVideoOptions {
     fn default() -> Self {
-        Self {
-            output_path: PathBuf::from("output.mp4"),
-            font_size: 14.0,
-            crf: 18,
-            mux_audio: false,
-            use_colors: None,
-        }
+        Self {output_path: PathBuf::from("output.mp4"), font_size: 14.0, crf: 18, mux_audio: false, use_colors: None}
     }
 }
 
@@ -1046,12 +988,7 @@ impl AsciiConverter {
                 for batch_start in (0..total_frames).step_by(batch_size) {
                     let batch_end = (batch_start + batch_size).min(total_frames);
                     let batch = &png_paths[batch_start..batch_end];
-                    let frame_data: Result<Vec<convert::AsciiFrameData>> = batch
-                        .par_iter()
-                        .map(|path| {
-                            convert::image_to_ascii_frame_data_with_analysis(path, conv_opts.font_ratio, conv_opts.luminance, bg_threshold, conv_opts.columns, ascii_chars, conv_opts.cell_color_mode, background_analysis.as_ref())
-                        })
-                        .collect();
+                    let frame_data: Result<Vec<convert::AsciiFrameData>> = batch.par_iter().map(|path| {convert::image_to_ascii_frame_data_with_analysis(path, conv_opts.font_ratio, conv_opts.luminance, bg_threshold, conv_opts.columns, ascii_chars, conv_opts.cell_color_mode, background_analysis.as_ref())}).collect();
                     if sender.send(frame_data).is_err() {
                         return;
                     }
