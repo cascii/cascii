@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-use crate::{render, CellColorMode, OutputMode, Progress};
+use crate::{background_fit_optimized, render, CellColorMode, OutputMode, Progress};
 
 /// Intermediate representation of one converted ASCII frame
 pub(crate) struct AsciiFrameData {
@@ -21,10 +21,16 @@ pub(crate) struct AsciiFrameData {
     pub(crate) bg_rgb_colors: Vec<u8>,
 }
 
-fn background_analysis_for_mode(ascii_chars: &[u8], cell_color_mode: CellColorMode) -> Result<Option<render::BackgroundAnalysisContext>> {
+pub(crate) enum BackgroundAnalysisContext {
+    Legacy(render::BackgroundAnalysisContext),
+    Optimized(background_fit_optimized::OptimizedBackgroundAnalysisContext),
+}
+
+pub(crate) fn background_analysis_for_mode(ascii_chars: &[u8], cell_color_mode: CellColorMode) -> Result<Option<BackgroundAnalysisContext>> {
     match cell_color_mode {
         CellColorMode::ForegroundOnly => Ok(None),
-        CellColorMode::FitForegroundBackground => render::background_analysis_context(ascii_chars).map(Some),
+        CellColorMode::FitForegroundBackground => render::background_analysis_context(ascii_chars).map(BackgroundAnalysisContext::Legacy).map(Some),
+        CellColorMode::FitForegroundBackgroundOptimized => background_fit_optimized::background_analysis_context(ascii_chars).map(BackgroundAnalysisContext::Optimized).map(Some),
     }
 }
 
@@ -34,15 +40,21 @@ pub(crate) fn image_to_ascii_frame_data(img_path: &Path, font_ratio: f32, thresh
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn image_to_ascii_frame_data_with_analysis(img_path: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, ascii_chars: &[u8], cell_color_mode: CellColorMode, background_analysis: Option<&render::BackgroundAnalysisContext>) -> Result<AsciiFrameData> {
+pub(crate) fn image_to_ascii_frame_data_with_analysis(img_path: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, ascii_chars: &[u8], cell_color_mode: CellColorMode, background_analysis: Option<&BackgroundAnalysisContext>) -> Result<AsciiFrameData> {
     match cell_color_mode {
         CellColorMode::ForegroundOnly => {
             let (ascii_text, width_chars, height_chars, rgb_colors) = image_to_ascii_with_colors(img_path, font_ratio, threshold, columns, ascii_chars)?;
             Ok(AsciiFrameData { ascii_text, width_chars, height_chars, rgb_colors, bg_rgb_colors: Vec::new() })
         }
         CellColorMode::FitForegroundBackground => match background_analysis {
-            Some(background_analysis) => render::fit_image_to_ascii_with_cell_backgrounds_with_context(img_path, font_ratio, threshold, bg_threshold, columns, background_analysis),
+            Some(BackgroundAnalysisContext::Legacy(background_analysis)) => render::fit_image_to_ascii_with_cell_backgrounds_with_context(img_path, font_ratio, threshold, bg_threshold, columns, background_analysis),
             None => render::fit_image_to_ascii_with_cell_backgrounds(img_path, font_ratio, threshold, bg_threshold, columns, ascii_chars),
+            Some(BackgroundAnalysisContext::Optimized(_)) => Err(anyhow!("legacy background mode received an optimized analysis context")),
+        },
+        CellColorMode::FitForegroundBackgroundOptimized => match background_analysis {
+            Some(BackgroundAnalysisContext::Optimized(background_analysis)) => background_fit_optimized::fit_image_to_ascii_with_cell_backgrounds_with_context(img_path, font_ratio, threshold, bg_threshold, columns, background_analysis),
+            None => background_fit_optimized::fit_image_to_ascii_with_cell_backgrounds(img_path, font_ratio, threshold, bg_threshold, columns, ascii_chars),
+            Some(BackgroundAnalysisContext::Legacy(_)) => Err(anyhow!("optimized background mode received a legacy analysis context")),
         },
     }
 }
@@ -57,20 +69,20 @@ pub(crate) fn convert_image_to_ascii(img_path: &Path, out_txt: &Path, font_ratio
         OutputMode::ColorOnly => {
             let frame = image_to_ascii_frame_data(img_path, font_ratio, threshold, bg_threshold, columns, ascii_chars, cell_color_mode)?;
             let cframe_path = out_txt.with_extension("cframe");
-            write_cframe_binary(frame.width_chars, frame.height_chars, &frame.ascii_text, &frame.rgb_colors, if frame.bg_rgb_colors.is_empty() { None } else { Some(frame.bg_rgb_colors.as_slice()) }, &cframe_path)?;
+            write_frame_cframe(&frame, &cframe_path, cell_color_mode)?;
         }
         OutputMode::TextAndColor => {
             let frame = image_to_ascii_frame_data(img_path, font_ratio, threshold, bg_threshold, columns, ascii_chars, cell_color_mode)?;
             fs::write(out_txt, &frame.ascii_text).with_context(|| format!("writing {}", out_txt.display()))?;
             let cframe_path = out_txt.with_extension("cframe");
-            write_cframe_binary(frame.width_chars, frame.height_chars, &frame.ascii_text, &frame.rgb_colors, if frame.bg_rgb_colors.is_empty() { None } else { Some(frame.bg_rgb_colors.as_slice()) }, &cframe_path)?;
+            write_frame_cframe(&frame, &cframe_path, cell_color_mode)?;
         }
     }
     Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
-fn convert_image_to_ascii_with_analysis(img_path: &Path, out_txt: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, background_analysis: Option<&render::BackgroundAnalysisContext>) -> Result<()> {
+fn convert_image_to_ascii_with_analysis(img_path: &Path, out_txt: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, background_analysis: Option<&BackgroundAnalysisContext>) -> Result<()> {
     match output_mode {
         OutputMode::TextOnly => {
             let ascii_string = image_to_ascii_string(img_path, font_ratio, threshold, columns, ascii_chars)?;
@@ -79,16 +91,25 @@ fn convert_image_to_ascii_with_analysis(img_path: &Path, out_txt: &Path, font_ra
         OutputMode::ColorOnly => {
             let frame = image_to_ascii_frame_data_with_analysis(img_path, font_ratio, threshold, bg_threshold, columns, ascii_chars, cell_color_mode, background_analysis)?;
             let cframe_path = out_txt.with_extension("cframe");
-            write_cframe_binary(frame.width_chars, frame.height_chars, &frame.ascii_text, &frame.rgb_colors, if frame.bg_rgb_colors.is_empty() { None } else { Some(frame.bg_rgb_colors.as_slice()) }, &cframe_path)?;
+            write_frame_cframe(&frame, &cframe_path, cell_color_mode)?;
         }
         OutputMode::TextAndColor => {
             let frame = image_to_ascii_frame_data_with_analysis(img_path, font_ratio, threshold, bg_threshold, columns, ascii_chars, cell_color_mode, background_analysis)?;
             fs::write(out_txt, &frame.ascii_text).with_context(|| format!("writing {}", out_txt.display()))?;
             let cframe_path = out_txt.with_extension("cframe");
-            write_cframe_binary(frame.width_chars, frame.height_chars, &frame.ascii_text, &frame.rgb_colors, if frame.bg_rgb_colors.is_empty() { None } else { Some(frame.bg_rgb_colors.as_slice()) }, &cframe_path)?;
+            write_frame_cframe(&frame, &cframe_path, cell_color_mode)?;
         }
     }
     Ok(())
+}
+
+fn write_frame_cframe(frame: &AsciiFrameData, path: &Path, cell_color_mode: CellColorMode) -> Result<()> {
+    let background = if frame.bg_rgb_colors.is_empty() { None } else { Some(frame.bg_rgb_colors.as_slice()) };
+    if cell_color_mode == CellColorMode::FitForegroundBackgroundOptimized {
+        write_cframe_binary_buffered(frame.width_chars, frame.height_chars, &frame.ascii_text, &frame.rgb_colors, background, path)
+    } else {
+        write_cframe_binary(frame.width_chars, frame.height_chars, &frame.ascii_text, &frame.rgb_colors, background, path)
+    }
 }
 
 pub(crate) fn image_to_ascii_string(img_path: &Path, font_ratio: f32, threshold: u8, columns: Option<u32>, ascii_chars: &[u8]) -> Result<String> {
@@ -207,6 +228,46 @@ pub(crate) fn write_cframe_binary(width: u32, height: u32, ascii_content: &str, 
     Ok(())
 }
 
+fn write_cframe_binary_buffered(width: u32, height: u32, ascii_content: &str, rgb_data: &[u8], bg_rgb_data: Option<&[u8]>, path: &Path) -> Result<()> {
+    let cell_count = (width * height) as usize;
+    if rgb_data.len() != cell_count * 3 {
+        return Err(anyhow!("invalid foreground payload: expected {} bytes, got {}", cell_count * 3, rgb_data.len()));
+    }
+    if let Some(background) = bg_rgb_data {
+        if background.len() != cell_count * 3 {
+            return Err(anyhow!("invalid background payload: expected {} bytes, got {}", cell_count * 3, background.len()));
+        }
+    }
+
+    let extension_size = bg_rgb_data.map_or(0, |background| 1 + background.len());
+    let mut output = Vec::with_capacity(8 + cell_count * 4 + extension_size);
+    output.extend_from_slice(&width.to_le_bytes());
+    output.extend_from_slice(&height.to_le_bytes());
+
+    let mut cell_index = 0usize;
+    for byte in ascii_content.bytes().filter(|byte| *byte != b'\n') {
+        if cell_index >= cell_count {
+            return Err(anyhow!("ASCII payload contains more than {} cells", cell_count));
+        }
+        let color_offset = cell_index * 3;
+        output.extend_from_slice(&[
+            byte,
+            rgb_data[color_offset],
+            rgb_data[color_offset + 1],
+            rgb_data[color_offset + 2],
+        ]);
+        cell_index += 1;
+    }
+    if cell_index != cell_count {
+        return Err(anyhow!("ASCII payload contains {} cells, expected {}", cell_index, cell_count));
+    }
+    if let Some(background) = bg_rgb_data {
+        output.push(CFRAME_EXT_FLAG_HAS_BG);
+        output.extend_from_slice(background);
+    }
+    fs::write(path, output).with_context(|| format!("writing cframe file {}", path.display()))
+}
+
 /// Read a .cframe binary file into AsciiFrameData.
 ///
 /// Recognises both the legacy fg-only layout and the new extension area. For
@@ -308,6 +369,29 @@ pub(crate) fn convert_directory_parallel(src_dir: &Path, dst_dir: &Path, font_ra
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn convert_directory_parallel_with_progress<F>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, progress_callback: Option<F>) -> Result<usize> where F: Fn(usize, usize) + Send + Sync {
+    convert_directory_parallel_with_progress_at_columns(src_dir, dst_dir, font_ratio, threshold, bg_threshold, None, keep_images, ascii_chars, output_mode, cell_color_mode, progress_callback)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn convert_directory_parallel_optimized_with_progress<F>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: u32, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, progress_callback: Option<F>) -> Result<usize> where F: Fn(usize, usize) + Send + Sync {
+    let _ = columns;
+    convert_directory_parallel_with_progress_at_columns(
+        src_dir,
+        dst_dir,
+        font_ratio,
+        threshold,
+        bg_threshold,
+        None,
+        keep_images,
+        ascii_chars,
+        output_mode,
+        CellColorMode::FitForegroundBackgroundOptimized,
+        progress_callback,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn convert_directory_parallel_with_progress_at_columns<F>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, progress_callback: Option<F>) -> Result<usize> where F: Fn(usize, usize) + Send + Sync {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -322,7 +406,7 @@ pub(crate) fn convert_directory_parallel_with_progress<F>(src_dir: &Path, dst_di
     pngs.par_iter().try_for_each(|img_path| -> Result<()> {
         let file_stem = img_path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| anyhow!("bad file name"))?;
         let out_txt = dst_dir.join(format!("{}.txt", file_stem));
-        convert_image_to_ascii_with_analysis(img_path, &out_txt, font_ratio, threshold, bg_threshold, None, ascii_chars, output_mode, cell_color_mode, background_analysis.as_ref())?;
+        convert_image_to_ascii_with_analysis(img_path, &out_txt, font_ratio, threshold, bg_threshold, columns, ascii_chars, output_mode, cell_color_mode, background_analysis.as_ref())?;
 
         // Update progress
         let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
@@ -345,6 +429,29 @@ pub(crate) fn convert_directory_parallel_with_progress<F>(src_dir: &Path, dst_di
 /// Internal function for directory conversion with detailed Progress reporting
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn convert_directory_parallel_with_detailed_progress<F>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, progress_callback: &F) -> Result<usize> where F: Fn(Progress) + Send + Sync {
+    convert_directory_parallel_with_detailed_progress_at_columns(src_dir, dst_dir, font_ratio, threshold, bg_threshold, None, keep_images, ascii_chars, output_mode, cell_color_mode, progress_callback)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn convert_directory_parallel_optimized_with_detailed_progress<F>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: u32, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, progress_callback: &F) -> Result<usize> where F: Fn(Progress) + Send + Sync {
+    let _ = columns;
+    convert_directory_parallel_with_detailed_progress_at_columns(
+        src_dir,
+        dst_dir,
+        font_ratio,
+        threshold,
+        bg_threshold,
+        None,
+        keep_images,
+        ascii_chars,
+        output_mode,
+        CellColorMode::FitForegroundBackgroundOptimized,
+        progress_callback,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn convert_directory_parallel_with_detailed_progress_at_columns<F>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, progress_callback: &F) -> Result<usize> where F: Fn(Progress) + Send + Sync {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -363,7 +470,7 @@ pub(crate) fn convert_directory_parallel_with_detailed_progress<F>(src_dir: &Pat
     pngs.par_iter().try_for_each(|img_path| -> Result<()> {
         let file_stem = img_path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| anyhow!("bad file name"))?;
         let out_txt = dst_dir.join(format!("{}.txt", file_stem));
-        convert_image_to_ascii_with_analysis(img_path, &out_txt, font_ratio, threshold, bg_threshold, None, ascii_chars, output_mode, cell_color_mode, background_analysis.as_ref())?;
+        convert_image_to_ascii_with_analysis(img_path, &out_txt, font_ratio, threshold, bg_threshold, columns, ascii_chars, output_mode, cell_color_mode, background_analysis.as_ref())?;
 
         // Update progress - throttle to only report every 1% change
         let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
@@ -438,6 +545,22 @@ mod tests {
         assert_eq!(raw[16], CFRAME_EXT_FLAG_HAS_BG);
 
         let frame = read_cframe_to_frame_data(tmp.path()).unwrap();
+        assert_eq!(frame.rgb_colors, rgb);
+        assert_eq!(frame.bg_rgb_colors, bg);
+    }
+
+    #[test]
+    fn buffered_cframe_round_trip_matches_legacy_layout() {
+        let chars = [b'A', b'B'];
+        let rgb = vec![1, 2, 3, 4, 5, 6];
+        let bg = vec![7, 8, 9, 10, 11, 12];
+        let text = ascii_content_for(2, 1, &chars);
+        let tmp = NamedTempFile::new().unwrap();
+
+        write_cframe_binary_buffered(2, 1, &text, &rgb, Some(&bg), tmp.path()).unwrap();
+        let frame = read_cframe_to_frame_data(tmp.path()).unwrap();
+
+        assert_eq!(frame.ascii_text, text);
         assert_eq!(frame.rgb_colors, rgb);
         assert_eq!(frame.bg_rgb_colors, bg);
     }
