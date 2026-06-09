@@ -71,6 +71,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
+pub mod color_shift;
 pub mod convert;
 pub mod crop;
 pub mod loop_detect;
@@ -78,6 +79,61 @@ pub mod preprocessing;
 pub mod render;
 pub mod video;
 mod background_fit_optimized;
+
+/// A cheap, clonable cancellation flag shared between a running conversion and
+/// the code that wants to stop it.
+///
+/// Cloning shares the same underlying flag, so a clone handed to another thread
+/// (or stored in a registry) can cancel work running elsewhere. Conversions
+/// check the token cooperatively at frame boundaries and while waiting on
+/// `ffmpeg`, so cancellation is "stop soon" rather than instantaneous.
+#[derive(Clone, Default)]
+pub struct CancelToken(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl CancelToken {
+    /// Create a fresh, not-yet-cancelled token.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Request cancellation. Idempotent and cheap to call from any thread.
+    pub fn cancel(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Returns `true` once [`cancel`](Self::cancel) has been called.
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// Error returned by conversion functions when a [`CancelToken`] was triggered
+/// mid-flight.
+///
+/// Callers can downcast the returned `anyhow::Error` to tell a user-requested
+/// cancellation apart from a genuine failure:
+///
+/// ```no_run
+/// # let err: anyhow::Error = anyhow::anyhow!("x");
+/// if err.downcast_ref::<cascii::Cancelled>().is_some() {
+///     // cancelled by the user — not a real error
+/// }
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct Cancelled;
+
+impl std::fmt::Display for Cancelled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "operation cancelled")
+    }
+}
+
+impl std::error::Error for Cancelled {}
+
+/// Returns `true` if `err` represents a [`Cancelled`] cancellation.
+pub fn is_cancelled_error(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<Cancelled>().is_some()
+}
 
 /// Configuration for ffmpeg/ffprobe binary paths
 ///
@@ -539,12 +595,13 @@ impl Default for ToVideoOptions {
 pub struct AsciiConverter {
     config: AppConfig,
     ffmpeg_config: FfmpegConfig,
+    cancel_token: Option<CancelToken>,
 }
 
 impl AsciiConverter {
     /// Create a new converter with default configuration
     pub fn new() -> Self {
-        Self {config: AppConfig::default(), ffmpeg_config: FfmpegConfig::default()}
+        Self {config: AppConfig::default(), ffmpeg_config: FfmpegConfig::default(), cancel_token: None}
     }
 
     /// Create a converter with custom configuration
@@ -553,7 +610,7 @@ impl AsciiConverter {
         if !config.ascii_chars.is_ascii() {
             return Err(anyhow!("Config contains non-ASCII characters in ascii_chars field. This will cause corrupted output. Please use only ASCII characters."));
         }
-        Ok(Self {config, ffmpeg_config: FfmpegConfig::default()})
+        Ok(Self {config, ffmpeg_config: FfmpegConfig::default(), cancel_token: None})
     }
 
     /// Set custom ffmpeg/ffprobe paths for this converter
@@ -572,6 +629,24 @@ impl AsciiConverter {
         self
     }
 
+    /// Attach a [`CancelToken`] so an in-flight conversion can be interrupted.
+    ///
+    /// Hold a clone of the token elsewhere (e.g. a job registry) and call
+    /// [`CancelToken::cancel`] to stop the work. Without a token, conversions
+    /// run to completion as before.
+    ///
+    /// ```no_run
+    /// use cascii::{AsciiConverter, CancelToken};
+    ///
+    /// let token = CancelToken::new();
+    /// let converter = AsciiConverter::new().with_cancel_token(token.clone());
+    /// // hand `token` to another thread; calling `token.cancel()` stops the run.
+    /// ```
+    pub fn with_cancel_token(mut self, token: CancelToken) -> Self {
+        self.cancel_token = Some(token);
+        self
+    }
+
     /// Load configuration from a file
     pub fn from_config_file(path: &Path) -> Result<Self> {
         let text = fs::read_to_string(path)
@@ -586,7 +661,7 @@ impl AsciiConverter {
             ));
         }
 
-        Ok(Self {config, ffmpeg_config: FfmpegConfig::default()})
+        Ok(Self {config, ffmpeg_config: FfmpegConfig::default(), cancel_token: None})
     }
 
     /// Get the current configuration
@@ -721,18 +796,18 @@ impl AsciiConverter {
 
         // Extract frames with ffmpeg
         let ascii_chars = conv_opts.ascii_chars.as_bytes();
-        video::extract_video_frames(input, output_dir, video_opts.columns, video_opts.fps, video_opts.start.as_deref(), video_opts.end.as_deref(), video_opts.preprocess_filter.as_deref(), &self.ffmpeg_config)?;
+        video::extract_video_frames(input, output_dir, video_opts.columns, video_opts.fps, video_opts.start.as_deref(), video_opts.end.as_deref(), video_opts.preprocess_filter.as_deref(), &self.ffmpeg_config, self.cancel_token.as_ref())?;
 
         // Extract audio if requested
         if video_opts.extract_audio {
-            video::extract_audio(input, output_dir, video_opts.start.as_deref(), video_opts.end.as_deref(), &self.ffmpeg_config)?;
+            video::extract_audio(input, output_dir, video_opts.start.as_deref(), video_opts.end.as_deref(), &self.ffmpeg_config, self.cancel_token.as_ref())?;
         }
 
         // Convert frames to ASCII with progress callback
         let total_frames = if conv_opts.cell_color_mode == CellColorMode::FitForegroundBackgroundOptimized {
-            convert::convert_directory_parallel_optimized_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), conv_opts.columns.unwrap_or(video_opts.columns), keep_images, ascii_chars, &conv_opts.output_mode, progress_callback)?
+            convert::convert_directory_parallel_optimized_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), conv_opts.columns.unwrap_or(video_opts.columns), keep_images, ascii_chars, &conv_opts.output_mode, progress_callback, self.cancel_token.as_ref())?
         } else {
-            convert::convert_directory_parallel_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), keep_images, ascii_chars, &conv_opts.output_mode, conv_opts.cell_color_mode, progress_callback)?
+            convert::convert_directory_parallel_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), keep_images, ascii_chars, &conv_opts.output_mode, conv_opts.cell_color_mode, progress_callback, self.cancel_token.as_ref())?
         };
 
         // Build result with conversion details
@@ -821,19 +896,19 @@ impl AsciiConverter {
 
         // Phase 1: Extract frames from video with progress reporting
         let ascii_chars = conv_opts.ascii_chars.as_bytes();
-        video::extract_video_frames_with_progress(input, output_dir, video_opts, &self.ffmpeg_config, &progress_callback)?;
+        video::extract_video_frames_with_progress(input, output_dir, video_opts, &self.ffmpeg_config, &progress_callback, self.cancel_token.as_ref())?;
 
         // Phase 2: Extract audio if requested
         if video_opts.extract_audio {
             progress_callback(Progress::extracting_audio());
-            video::extract_audio(input, output_dir, video_opts.start.as_deref(), video_opts.end.as_deref(), &self.ffmpeg_config)?;
+            video::extract_audio(input, output_dir, video_opts.start.as_deref(), video_opts.end.as_deref(), &self.ffmpeg_config, self.cancel_token.as_ref())?;
         }
 
         // Phase 3: Convert frames to ASCII with progress
         let total_frames = if conv_opts.cell_color_mode == CellColorMode::FitForegroundBackgroundOptimized {
-            convert::convert_directory_parallel_optimized_with_detailed_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), conv_opts.columns.unwrap_or(video_opts.columns), keep_images, ascii_chars, &conv_opts.output_mode, &progress_callback)?
+            convert::convert_directory_parallel_optimized_with_detailed_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), conv_opts.columns.unwrap_or(video_opts.columns), keep_images, ascii_chars, &conv_opts.output_mode, &progress_callback, self.cancel_token.as_ref())?
         } else {
-            convert::convert_directory_parallel_with_detailed_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), keep_images, ascii_chars, &conv_opts.output_mode, conv_opts.cell_color_mode, &progress_callback)?
+            convert::convert_directory_parallel_with_detailed_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), keep_images, ascii_chars, &conv_opts.output_mode, conv_opts.cell_color_mode, &progress_callback, self.cancel_token.as_ref())?
         };
 
         // Phase 4: Complete
@@ -893,9 +968,10 @@ impl AsciiConverter {
                 ascii_chars,
                 &options.output_mode,
                 None::<fn(usize, usize)>,
+                self.cancel_token.as_ref(),
             )
         } else {
-            convert::convert_directory_parallel(input_dir, output_dir, options.font_ratio, options.luminance, options.resolve_bg_threshold(), keep_images, ascii_chars, &options.output_mode, options.cell_color_mode)
+            convert::convert_directory_parallel(input_dir, output_dir, options.font_ratio, options.luminance, options.resolve_bg_threshold(), keep_images, ascii_chars, &options.output_mode, options.cell_color_mode, self.cancel_token.as_ref())
         }
     }
 
@@ -932,7 +1008,7 @@ impl AsciiConverter {
     pub fn convert_directory_with_progress<F>(&self, input_dir: &Path, output_dir: &Path, options: &ConversionOptions, keep_images: bool, progress_callback: F) -> Result<usize> where F: Fn(Progress) + Send + Sync {
         fs::create_dir_all(output_dir)?;
         let ascii_chars = options.ascii_chars.as_bytes();
-        convert::convert_directory_parallel_with_detailed_progress(input_dir, output_dir, options.font_ratio, options.luminance, options.resolve_bg_threshold(), keep_images, ascii_chars, &options.output_mode, options.cell_color_mode, &progress_callback)
+        convert::convert_directory_parallel_with_detailed_progress(input_dir, output_dir, options.font_ratio, options.luminance, options.resolve_bg_threshold(), keep_images, ascii_chars, &options.output_mode, options.cell_color_mode, &progress_callback, self.cancel_token.as_ref())
     }
 
     /// Get a preset by name
@@ -975,12 +1051,12 @@ impl AsciiConverter {
 
         // Phase 1: Extract frames from video
         let ascii_chars = conv_opts.ascii_chars.as_bytes();
-        video::extract_video_frames_with_progress(input, temp_dir, video_opts, &self.ffmpeg_config, progress_callback)?;
+        video::extract_video_frames_with_progress(input, temp_dir, video_opts, &self.ffmpeg_config, progress_callback, self.cancel_token.as_ref())?;
 
         // Phase 2: Extract audio if requested
         let audio_path = if to_video_opts.mux_audio {
             progress_callback(Progress::extracting_audio());
-            video::extract_audio(input, temp_dir, video_opts.start.as_deref(), video_opts.end.as_deref(), &self.ffmpeg_config)?;
+            video::extract_audio(input, temp_dir, video_opts.start.as_deref(), video_opts.end.as_deref(), &self.ffmpeg_config, self.cancel_token.as_ref())?;
             Some(temp_dir.join("audio.mp3"))
         } else {
             None
@@ -1048,6 +1124,14 @@ impl AsciiConverter {
 
                 // Render and pipe sequentially (preserves frame order)
                 for frame in &frame_data {
+                    if self.cancel_token.as_ref().is_some_and(|c| c.is_cancelled()) {
+                        drop(stdin.take());
+                        if let Some(mut encoder) = child.take() {
+                            let _ = encoder.kill();
+                            let _ = encoder.wait();
+                        }
+                        return Err(Cancelled.into());
+                    }
                     let rgb_buf = render::render_ascii_frame_to_rgb(frame, &atlas, use_colors);
                     if let Err(e) = stdin.as_mut().unwrap().write_all(&rgb_buf) {
                         drop(stdin.take());
