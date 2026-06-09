@@ -3,10 +3,31 @@ use std::path::Path;
 use std::process::{Command as ProcCommand, Stdio};
 
 use crate::preprocessing::build_frame_extraction_vf;
-use crate::{FfmpegConfig, Progress, VideoOptions};
+use crate::{CancelToken, FfmpegConfig, Progress, VideoOptions};
+
+/// Spawn a configured ffmpeg command and wait for it, polling an optional
+/// cancellation token. If cancellation is requested the child process is killed
+/// and `Cancelled` is returned; otherwise behaves like a blocking wait.
+fn run_ffmpeg_cancellable(mut command: ProcCommand, cancel: Option<&CancelToken>, what: &str) -> Result<()> {
+    let mut child = command.spawn().with_context(|| format!("spawning {}", what))?;
+    loop {
+        if let Some(status) = child.try_wait().with_context(|| format!("waiting for {}", what))? {
+            if !status.success() {
+                return Err(anyhow!("{} failed", what));
+            }
+            return Ok(());
+        }
+        if cancel.is_some_and(|c| c.is_cancelled()) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(crate::Cancelled.into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn extract_video_frames(input: &Path, out_dir: &Path, columns: u32, fps: u32, start: Option<&str>, end: Option<&str>, preprocess_filter: Option<&str>, ffmpeg_config: &FfmpegConfig) -> Result<()> {
+pub(crate) fn extract_video_frames(input: &Path, out_dir: &Path, columns: u32, fps: u32, start: Option<&str>, end: Option<&str>, preprocess_filter: Option<&str>, ffmpeg_config: &FfmpegConfig, cancel: Option<&CancelToken>) -> Result<()> {
     let out_pattern = out_dir.join("frame_%04d.png");
     let mut ffmpeg_args: Vec<String> = vec!["-loglevel".into(), "error".into()];
 
@@ -47,15 +68,9 @@ pub(crate) fn extract_video_frames(input: &Path, out_dir: &Path, columns: u32, f
     ffmpeg_args.push(vf_option);
     ffmpeg_args.push(out_pattern.to_str().unwrap().to_string());
 
-    let status = ProcCommand::new(ffmpeg_config.ffmpeg_cmd())
-        .args(&ffmpeg_args)
-        .status()
-        .context("running ffmpeg")?;
-
-    if !status.success() {
-        return Err(anyhow!("ffmpeg failed"));
-    }
-    Ok(())
+    let mut command = ProcCommand::new(ffmpeg_config.ffmpeg_cmd());
+    command.args(&ffmpeg_args);
+    run_ffmpeg_cancellable(command, cancel, "ffmpeg")
 }
 
 /// Get video duration in microseconds using ffprobe
@@ -72,7 +87,7 @@ pub(crate) fn get_video_duration_us(input: &Path, ffmpeg_config: &FfmpegConfig) 
 }
 
 /// Extract video frames with progress reporting
-pub(crate) fn extract_video_frames_with_progress<F>(input: &Path, out_dir: &Path, video_opts: &VideoOptions, ffmpeg_config: &FfmpegConfig, progress_callback: &F) -> Result<()> where F: Fn(Progress) + Send + Sync {
+pub(crate) fn extract_video_frames_with_progress<F>(input: &Path, out_dir: &Path, video_opts: &VideoOptions, ffmpeg_config: &FfmpegConfig, progress_callback: &F, cancel: Option<&CancelToken>) -> Result<()> where F: Fn(Progress) + Send + Sync {
     let columns = video_opts.columns;
     let fps = video_opts.fps;
     let start = video_opts.start.as_deref();
@@ -123,17 +138,12 @@ pub(crate) fn extract_video_frames_with_progress<F>(input: &Path, out_dir: &Path
     ffmpeg_args.push(out_pattern.to_str().ok_or_else(|| anyhow!("output path is not valid UTF-8"))?.to_string());
     progress_callback(Progress::extracting_frames());
 
-    let mut child = ProcCommand::new(ffmpeg_config.ffmpeg_cmd()).args(&ffmpeg_args).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().context("spawning ffmpeg")?;
-
-    let status = child.wait().context("waiting for ffmpeg")?;
-    if !status.success() {
-        return Err(anyhow!("ffmpeg failed"));
-    }
-
-    Ok(())
+    let mut command = ProcCommand::new(ffmpeg_config.ffmpeg_cmd());
+    command.args(&ffmpeg_args).stdout(Stdio::piped()).stderr(Stdio::null());
+    run_ffmpeg_cancellable(command, cancel, "ffmpeg")
 }
 
-pub(crate) fn extract_audio(input: &Path, out_dir: &Path, start: Option<&str>, end: Option<&str>, ffmpeg_config: &FfmpegConfig) -> Result<()> {
+pub(crate) fn extract_audio(input: &Path, out_dir: &Path, start: Option<&str>, end: Option<&str>, ffmpeg_config: &FfmpegConfig, cancel: Option<&CancelToken>) -> Result<()> {
     let out_audio = out_dir.join("audio.mp3");
     let mut ffmpeg_args: Vec<String> = vec!["-loglevel".into(), "error".into(), "-y".into()];
 
@@ -177,11 +187,9 @@ pub(crate) fn extract_audio(input: &Path, out_dir: &Path, start: Option<&str>, e
     ffmpeg_args.push("2".into());
     ffmpeg_args.push(out_audio.to_str().unwrap().to_string());
 
-    let status = ProcCommand::new(ffmpeg_config.ffmpeg_cmd()).args(&ffmpeg_args).status().context("running ffmpeg for audio extraction")?;
-
-    if !status.success() {
-        return Err(anyhow!("ffmpeg audio extraction failed"));
-    }
+    let mut command = ProcCommand::new(ffmpeg_config.ffmpeg_cmd());
+    command.args(&ffmpeg_args);
+    run_ffmpeg_cancellable(command, cancel, "ffmpeg audio extraction")?;
     Ok(())
 }
 
