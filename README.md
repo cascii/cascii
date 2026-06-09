@@ -103,6 +103,8 @@ cascii my_video.mp4 --start 00:00:10 --end 00:00:15
 - `-l`, `--large`: Uses larger default values for quality settings.
 - `--colors`: Generate both `.txt` and `.cframe` (color) output files.
 - `--color-only`: Generate only `.cframe` files (no `.txt`).
+- `--fit-cell-backgrounds`: Use the original exhaustive foreground/background fitter.
+- `--fit-cell-backgrounds-optimized`: Use the competing optimized foreground/background fitter. This conflicts with `--fit-cell-backgrounds`.
 - `--audio`: Extract audio from the video to `audio.mp3`.
 - `--luminance`: Luminance threshold (0-255) for what is considered transparent.
 - `--keep-images`: Keep intermediate PNG frames after conversion.
@@ -113,6 +115,41 @@ cascii my_video.mp4 --start 00:00:10 --end 00:00:15
 - `--find-loop`: Detect repeated frame loops in a directory of `frame_*.txt` files.
 - `-h`, `--help`: Shows the help message.
 - `-V`, `--version`: Shows the version information.
+
+## Compare Background Fitters
+
+Build the release binary before benchmarking:
+
+```bash
+cargo build --release
+```
+
+Compare both implementations on the same image with one command:
+
+```bash
+scripts/compare_background_image.sh LNG.PNG
+```
+
+The script runs and times both fitters, verifies that their `.cframe` files are
+byte-identical, and writes `legacy.png`, `optimized.png`, `side-by-side.png`,
+`difference.png`, and `comparison.txt` to a timestamped directory under
+`/tmp`. It exits with an error if the generated cframes differ.
+
+An explicit output directory and column count can also be provided:
+
+```bash
+scripts/compare_background_image.sh LNG.PNG /tmp/cascii-lng-comparison 170
+```
+
+For a video, run the comparison script. It times both modes, renders both
+outputs, and creates a side-by-side MP4:
+
+```bash
+scripts/compare_background_modes.sh input.mp4 /tmp/cascii-background-comparison 170 30 0 5
+```
+
+Arguments after the input are optional and represent output directory,
+columns, FPS, start time, and end time.
 
 # Export Movie
 

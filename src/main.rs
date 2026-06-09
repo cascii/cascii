@@ -124,12 +124,16 @@ struct Args {
     crf: u8,
 
     /// Experimental option C: fit per-cell foreground/background colors for direct video rendering
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = false, conflicts_with = "fit_cell_backgrounds_optimized")]
     fit_cell_backgrounds: bool,
+
+    /// Optimized per-cell foreground/background fitting implementation
+    #[arg(long, default_value_t = false, conflicts_with = "fit_cell_backgrounds")]
+    fit_cell_backgrounds_optimized: bool,
 
     /// Override the luminance threshold used for the per-cell background pass.
     /// Defaults to the foreground `--luminance` value. Only effective when
-    /// `--fit-cell-backgrounds` is also set.
+    /// a cell-background fitting mode is enabled.
     #[arg(long)]
     bg_luminance: Option<u8>,
 
@@ -311,7 +315,11 @@ fn main() -> Result<()> {
         return Err(anyhow!("--preprocess-output requires --preprocess or --preprocess-preset"));
     }
 
-    let is_image_input = input_path.is_file() && matches!(input_path.extension().and_then(|s| s.to_str()), Some("png" | "jpg" | "jpeg"));
+    let is_image_input = input_path.is_file()
+        && input_path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg"));
 
     if let Some(ref filter) = preprocess_filter {
         if let Some(output_target) = args.preprocess_output.as_ref() {
@@ -459,8 +467,16 @@ fn main() -> Result<()> {
         OutputMode::TextOnly
     };
 
-    if args.fit_cell_backgrounds && matches!(output_mode, OutputMode::TextOnly) && !args.to_video {
-        eprintln!("warning: --fit-cell-backgrounds has no effect with text-only output; pass --colors or --to-video to use the generated backgrounds.");
+    let cell_color_mode = if args.fit_cell_backgrounds_optimized {
+        CellColorMode::FitForegroundBackgroundOptimized
+    } else if args.fit_cell_backgrounds {
+        CellColorMode::FitForegroundBackground
+    } else {
+        CellColorMode::ForegroundOnly
+    };
+
+    if cell_color_mode.fits_cell_backgrounds() && matches!(output_mode, OutputMode::TextOnly) && !args.to_video {
+        eprintln!("warning: cell-background fitting has no effect with text-only output; pass --colors or --to-video to use the generated backgrounds.");
     }
 
     // Create conversion options
@@ -471,7 +487,7 @@ fn main() -> Result<()> {
         bg_luminance: args.bg_luminance,
         ascii_chars: cfg.ascii_chars.clone(),
         output_mode: output_mode.clone(),
-        cell_color_mode: if args.fit_cell_backgrounds { CellColorMode::FitForegroundBackground } else { CellColorMode::ForegroundOnly },
+        cell_color_mode,
     };
 
     if input_path.is_file() {
@@ -619,8 +635,8 @@ fn main() -> Result<()> {
         }
     } else if input_path.is_dir() {
         if args.to_video {
-            if args.fit_cell_backgrounds {
-                eprintln!("note: --fit-cell-backgrounds is a conversion-time flag and has no effect when rendering an existing frame directory; backgrounds already stored in .cframe files are preserved automatically.");
+            if cell_color_mode.fits_cell_backgrounds() {
+                eprintln!("note: cell-background fitting flags have no effect when rendering an existing frame directory; backgrounds already stored in .cframe files are preserved automatically.");
             }
             let to_video_opts = ToVideoOptions {output_path: video_output_path.clone(), font_size: args.video_font_size, crf: args.crf, mux_audio: args.audio, use_colors: None};
             let progress_bar: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
@@ -671,7 +687,7 @@ fn main() -> Result<()> {
                 OutputMode::TextAndColor => "text+color",
             };
 
-            let result = cascii::ConversionResult {frame_count, columns, font_ratio, luminance, fps: None, output_mode: mode_str.to_string(), audio_extracted: false, output_dir: output_path.clone(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds: args.fit_cell_backgrounds, bg_luminance: args.bg_luminance.unwrap_or(luminance)};
+            let result = cascii::ConversionResult {frame_count, columns, font_ratio, luminance, fps: None, output_mode: mode_str.to_string(), audio_extracted: false, output_dir: output_path.clone(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds: cell_color_mode.fits_cell_backgrounds(), cell_background_mode: cell_color_mode.as_str().to_string(), bg_luminance: args.bg_luminance.unwrap_or(luminance)};
 
             result.write_details_file().context("writing details file")?;
             let details = result.to_details_string();

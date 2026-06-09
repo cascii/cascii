@@ -77,6 +77,7 @@ pub mod loop_detect;
 pub mod preprocessing;
 pub mod render;
 pub mod video;
+mod background_fit_optimized;
 
 /// Configuration for ffmpeg/ffprobe binary paths
 ///
@@ -224,8 +225,15 @@ pub struct ConversionResult {
     pub color: String,
     /// Whether per-cell background fitting was enabled
     pub fit_cell_backgrounds: bool,
+    /// Background fitting implementation: "off", "legacy", or "optimized"
+    #[serde(default = "default_cell_background_mode")]
+    pub cell_background_mode: String,
     /// Resolved background luminance threshold actually used by the bg-fit pass. Equal to `luminance` unless an explicit override was set via `ConversionOptions::with_bg_luminance`.
     pub bg_luminance: u8,
+}
+
+fn default_cell_background_mode() -> String {
+    "off".to_string()
 }
 
 /// Serializable details written to `details.toml`
@@ -243,6 +251,7 @@ struct Details {
     background_color: String,
     color: String,
     fit_cell_backgrounds: bool,
+    cell_background_mode: String,
     bg_luminance: u8,
 }
 
@@ -260,6 +269,7 @@ impl ConversionResult {
             background_color: self.background_color.clone(),
             color: self.color.clone(),
             fit_cell_backgrounds: self.fit_cell_backgrounds,
+            cell_background_mode: self.cell_background_mode.clone(),
             bg_luminance: self.bg_luminance,
         }
     }
@@ -347,6 +357,22 @@ pub enum CellColorMode {
     ForegroundOnly,
     /// Experimental option C: fit both foreground and background colors per cell.
     FitForegroundBackground,
+    /// Optimized foreground/background fitter with a small atlas and candidate shortlist.
+    FitForegroundBackgroundOptimized,
+}
+
+impl CellColorMode {
+    pub fn fits_cell_backgrounds(self) -> bool {
+        self != Self::ForegroundOnly
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ForegroundOnly => "off",
+            Self::FitForegroundBackground => "legacy",
+            Self::FitForegroundBackgroundOptimized => "optimized",
+        }
+    }
 }
 
 /// Options for ASCII conversion
@@ -694,6 +720,7 @@ impl AsciiConverter {
         fs::create_dir_all(output_dir).context("creating output directory")?;
 
         // Extract frames with ffmpeg
+        let ascii_chars = conv_opts.ascii_chars.as_bytes();
         video::extract_video_frames(input, output_dir, video_opts.columns, video_opts.fps, video_opts.start.as_deref(), video_opts.end.as_deref(), video_opts.preprocess_filter.as_deref(), &self.ffmpeg_config)?;
 
         // Extract audio if requested
@@ -702,8 +729,11 @@ impl AsciiConverter {
         }
 
         // Convert frames to ASCII with progress callback
-        let ascii_chars = conv_opts.ascii_chars.as_bytes();
-        let total_frames = convert::convert_directory_parallel_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), keep_images, ascii_chars, &conv_opts.output_mode, conv_opts.cell_color_mode, progress_callback)?;
+        let total_frames = if conv_opts.cell_color_mode == CellColorMode::FitForegroundBackgroundOptimized {
+            convert::convert_directory_parallel_optimized_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), conv_opts.columns.unwrap_or(video_opts.columns), keep_images, ascii_chars, &conv_opts.output_mode, progress_callback)?
+        } else {
+            convert::convert_directory_parallel_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), keep_images, ascii_chars, &conv_opts.output_mode, conv_opts.cell_color_mode, progress_callback)?
+        };
 
         // Build result with conversion details
         let output_mode_str = match conv_opts.output_mode {
@@ -723,7 +753,8 @@ impl AsciiConverter {
             output_dir: output_dir.to_path_buf(),
             background_color: "black".to_string(),
             color: "white".to_string(),
-            fit_cell_backgrounds: matches!(conv_opts.cell_color_mode, CellColorMode::FitForegroundBackground),
+            fit_cell_backgrounds: conv_opts.cell_color_mode.fits_cell_backgrounds(),
+            cell_background_mode: conv_opts.cell_color_mode.as_str().to_string(),
             bg_luminance: conv_opts.resolve_bg_threshold(),
         };
 
@@ -789,6 +820,7 @@ impl AsciiConverter {
         fs::create_dir_all(output_dir).context("creating output directory")?;
 
         // Phase 1: Extract frames from video with progress reporting
+        let ascii_chars = conv_opts.ascii_chars.as_bytes();
         video::extract_video_frames_with_progress(input, output_dir, video_opts, &self.ffmpeg_config, &progress_callback)?;
 
         // Phase 2: Extract audio if requested
@@ -798,8 +830,11 @@ impl AsciiConverter {
         }
 
         // Phase 3: Convert frames to ASCII with progress
-        let ascii_chars = conv_opts.ascii_chars.as_bytes();
-        let total_frames = convert::convert_directory_parallel_with_detailed_progress(output_dir,  output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), keep_images, ascii_chars, &conv_opts.output_mode, conv_opts.cell_color_mode, &progress_callback)?;
+        let total_frames = if conv_opts.cell_color_mode == CellColorMode::FitForegroundBackgroundOptimized {
+            convert::convert_directory_parallel_optimized_with_detailed_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), conv_opts.columns.unwrap_or(video_opts.columns), keep_images, ascii_chars, &conv_opts.output_mode, &progress_callback)?
+        } else {
+            convert::convert_directory_parallel_with_detailed_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), keep_images, ascii_chars, &conv_opts.output_mode, conv_opts.cell_color_mode, &progress_callback)?
+        };
 
         // Phase 4: Complete
         progress_callback(Progress::complete(total_frames));
@@ -822,7 +857,8 @@ impl AsciiConverter {
             output_dir: output_dir.to_path_buf(),
             background_color: "black".to_string(),
             color: "white".to_string(),
-            fit_cell_backgrounds: matches!(conv_opts.cell_color_mode, CellColorMode::FitForegroundBackground),
+            fit_cell_backgrounds: conv_opts.cell_color_mode.fits_cell_backgrounds(),
+            cell_background_mode: conv_opts.cell_color_mode.as_str().to_string(),
             bg_luminance: conv_opts.resolve_bg_threshold(),
         };
 
@@ -845,7 +881,22 @@ impl AsciiConverter {
     pub fn convert_directory(&self, input_dir: &Path, output_dir: &Path, options: &ConversionOptions, keep_images: bool) -> Result<usize> {
         fs::create_dir_all(output_dir)?;
         let ascii_chars = options.ascii_chars.as_bytes();
-        convert::convert_directory_parallel(input_dir, output_dir, options.font_ratio, options.luminance, options.resolve_bg_threshold(), keep_images, ascii_chars, &options.output_mode, options.cell_color_mode)
+        if options.cell_color_mode == CellColorMode::FitForegroundBackgroundOptimized {
+            convert::convert_directory_parallel_optimized_with_progress(
+                input_dir,
+                output_dir,
+                options.font_ratio,
+                options.luminance,
+                options.resolve_bg_threshold(),
+                options.columns.unwrap_or(400),
+                keep_images,
+                ascii_chars,
+                &options.output_mode,
+                None::<fn(usize, usize)>,
+            )
+        } else {
+            convert::convert_directory_parallel(input_dir, output_dir, options.font_ratio, options.luminance, options.resolve_bg_threshold(), keep_images, ascii_chars, &options.output_mode, options.cell_color_mode)
+        }
     }
 
     /// Convert a directory of images to ASCII frames with detailed progress reporting
@@ -923,6 +974,7 @@ impl AsciiConverter {
         use std::thread;
 
         // Phase 1: Extract frames from video
+        let ascii_chars = conv_opts.ascii_chars.as_bytes();
         video::extract_video_frames_with_progress(input, temp_dir, video_opts, &self.ffmpeg_config, progress_callback)?;
 
         // Phase 2: Extract audio if requested
@@ -954,11 +1006,7 @@ impl AsciiConverter {
         let atlas = render::build_glyph_atlas(to_video_opts.font_size)?;
 
         // Phase 4: Convert first frame to determine output resolution
-        let ascii_chars = conv_opts.ascii_chars.as_bytes();
-        let background_analysis = match conv_opts.cell_color_mode {
-            CellColorMode::ForegroundOnly => None,
-            CellColorMode::FitForegroundBackground => Some(render::background_analysis_context(ascii_chars)?),
-        };
+        let background_analysis = convert::background_analysis_for_mode(ascii_chars, conv_opts.cell_color_mode)?;
         let bg_threshold = conv_opts.resolve_bg_threshold();
         let first_frame = convert::image_to_ascii_frame_data_with_analysis(&png_paths[0], conv_opts.font_ratio, conv_opts.luminance, bg_threshold, conv_opts.columns, ascii_chars, conv_opts.cell_color_mode, background_analysis.as_ref())?;
         let mut pixel_w = first_frame.width_chars * atlas.cell_width;
@@ -1055,7 +1103,8 @@ impl AsciiConverter {
             output_dir: to_video_opts.output_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
             background_color: "black".to_string(),
             color: "white".to_string(),
-            fit_cell_backgrounds: matches!(conv_opts.cell_color_mode, CellColorMode::FitForegroundBackground),
+            fit_cell_backgrounds: conv_opts.cell_color_mode.fits_cell_backgrounds(),
+            cell_background_mode: conv_opts.cell_color_mode.as_str().to_string(),
             bg_luminance: conv_opts.resolve_bg_threshold(),
         })
     }
@@ -1174,6 +1223,7 @@ impl AsciiConverter {
 
         let mode_str = if use_cframes { "color" } else { "text-only" };
 
+        let fit_cell_backgrounds = first_frame.bg_rgb_colors.len() == (first_frame.width_chars * first_frame.height_chars * 3) as usize;
         Ok(ConversionResult {
             frame_count: total_frames,
             columns: first_frame.width_chars,
@@ -1185,7 +1235,8 @@ impl AsciiConverter {
             output_dir: to_video_opts.output_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
             background_color: "black".to_string(),
             color: "white".to_string(),
-            fit_cell_backgrounds: first_frame.bg_rgb_colors.len() == (first_frame.width_chars * first_frame.height_chars * 3) as usize,
+            fit_cell_backgrounds,
+            cell_background_mode: if fit_cell_backgrounds { "legacy" } else { "off" }.to_string(),
             bg_luminance: 0,
         })
     }
