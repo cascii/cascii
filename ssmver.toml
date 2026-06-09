@@ -1,4 +1,4 @@
-version = "0.21.0"
+version = "0.22.0"
 
 [settings]
 mode = "branch"
@@ -23,14 +23,3 @@ enabled = false
 on_bump = []
 match = ""
 skip = ""
-
-[changelog]
-# Enable changelog entry collection on version bumps
-enabled = false
-# Which bump levels trigger changelog collection (empty = all)
-# Example: ["minor", "major"]
-on_bump = []
-# Template name from ~/.ssmver/templates/changelog/ or "none"
-template = "none"
-# How to collect changelog entries: "inline" (terminal prompt) or "editor" ($EDITOR)
-editor = "editor"
