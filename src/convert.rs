@@ -508,6 +508,60 @@ mod tests {
     use super::*;
     use tempfile::NamedTempFile;
 
+    #[test]
+    fn convert_directory_returns_cancelled_when_token_tripped() {
+        let dir = tempfile::tempdir().unwrap();
+        // Write a few small PNGs to convert.
+        for i in 0..5 {
+            let path = dir.path().join(format!("frame_{:04}.png", i));
+            image::RgbImage::from_pixel(8, 8, image::Rgb([200, 200, 200])).save(&path).unwrap();
+        }
+
+        let token = CancelToken::new();
+        token.cancel(); // pre-cancel so the very first frame bails out
+
+        let err = convert_directory_parallel(
+            dir.path(),
+            dir.path(),
+            0.5,
+            20,
+            20,
+            true, // keep_images so we don't assert on cleanup
+            b" .:-=+*#%@",
+            &OutputMode::TextOnly,
+            CellColorMode::ForegroundOnly,
+            Some(&token),
+        )
+        .expect_err("a pre-cancelled token should make conversion fail");
+
+        assert!(crate::is_cancelled_error(&err), "expected Cancelled, got: {err}");
+    }
+
+    #[test]
+    fn convert_directory_completes_without_cancel_token() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..3 {
+            let path = dir.path().join(format!("frame_{:04}.png", i));
+            image::RgbImage::from_pixel(8, 8, image::Rgb([200, 200, 200])).save(&path).unwrap();
+        }
+
+        let total = convert_directory_parallel(
+            dir.path(),
+            dir.path(),
+            0.5,
+            20,
+            20,
+            true,
+            b" .:-=+*#%@",
+            &OutputMode::TextOnly,
+            CellColorMode::ForegroundOnly,
+            None,
+        )
+        .expect("conversion without a token should succeed");
+
+        assert_eq!(total, 3);
+    }
+
     fn ascii_content_for(width: u32, height: u32, chars: &[u8]) -> String {
         let mut out = String::with_capacity(((width as usize) + 1) * height as usize);
         for row in 0..height as usize {
