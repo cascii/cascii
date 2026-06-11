@@ -21,36 +21,21 @@ pub struct ColorShift {
 
 impl ColorShift {
     pub fn foreground(degrees: f32) -> Self {
-        Self {
-            target: ColorShiftTarget::Foreground,
-            foreground_degrees: degrees,
-            background_degrees: 0.0,
-        }
+        Self {target: ColorShiftTarget::Foreground, foreground_degrees: degrees, background_degrees: 0.0}
     }
 
     pub fn background(degrees: f32) -> Self {
-        Self {
-            target: ColorShiftTarget::Background,
-            foreground_degrees: 0.0,
-            background_degrees: degrees,
-        }
+        Self {target: ColorShiftTarget::Background, foreground_degrees: 0.0, background_degrees: degrees}
     }
 
     pub fn both(foreground_degrees: f32, background_degrees: f32) -> Self {
-        Self {
-            target: ColorShiftTarget::Both,
-            foreground_degrees,
-            background_degrees,
-        }
+        Self {target: ColorShiftTarget::Both, foreground_degrees, background_degrees}
     }
 }
 
 pub fn shift_rgb_triplets(rgb: &mut [u8], degrees: f32) -> Result<()> {
     if !rgb.len().is_multiple_of(RGB_SIZE) {
-        return Err(anyhow!(
-            "RGB payload length must be divisible by 3, got {}",
-            rgb.len()
-        ));
+        return Err(anyhow!("RGB payload length must be divisible by 3, got {}", rgb.len()));
     }
     if !degrees.is_finite() {
         return Err(anyhow!("hue shift must be finite"));
@@ -77,58 +62,33 @@ pub fn shift_cframe_bytes(data: &[u8], shift: ColorShift) -> Result<Vec<u8>> {
         return Err(anyhow!("cframe dimensions must be non-zero"));
     }
 
-    let cell_count = width
-        .checked_mul(height)
-        .ok_or_else(|| anyhow!("cframe dimensions overflow"))?;
-    let body_len = cell_count
-        .checked_mul(CELL_SIZE)
-        .ok_or_else(|| anyhow!("cframe body size overflow"))?;
-    let body_end = HEADER_SIZE
-        .checked_add(body_len)
-        .ok_or_else(|| anyhow!("cframe body offset overflow"))?;
+    let cell_count = width.checked_mul(height).ok_or_else(|| anyhow!("cframe dimensions overflow"))?;
+    let body_len = cell_count.checked_mul(CELL_SIZE).ok_or_else(|| anyhow!("cframe body size overflow"))?;
+    let body_end = HEADER_SIZE.checked_add(body_len).ok_or_else(|| anyhow!("cframe body offset overflow"))?;
     if data.len() < body_end {
-        return Err(anyhow!(
-            "cframe file truncated: expected at least {} bytes, got {}",
-            body_end,
-            data.len()
-        ));
+        return Err(anyhow!("cframe file truncated: expected at least {} bytes, got {}", body_end, data.len()));
     }
 
     let mut output = data.to_vec();
 
-    if matches!(
-        shift.target,
-        ColorShiftTarget::Foreground | ColorShiftTarget::Both
-    ) {
+    if matches!(shift.target, ColorShiftTarget::Foreground | ColorShiftTarget::Both) {
         if !shift.foreground_degrees.is_finite() {
             return Err(anyhow!("foreground hue shift must be finite"));
         }
         for cell in 0..cell_count {
             let offset = HEADER_SIZE + cell * CELL_SIZE + 1;
-            let shifted = shift_rgb(
-                [output[offset], output[offset + 1], output[offset + 2]],
-                shift.foreground_degrees,
-            );
+            let shifted = shift_rgb([output[offset], output[offset + 1], output[offset + 2]], shift.foreground_degrees);
             output[offset..offset + RGB_SIZE].copy_from_slice(&shifted);
         }
     }
 
-    if matches!(
-        shift.target,
-        ColorShiftTarget::Background | ColorShiftTarget::Both
-    ) {
+    if matches!(shift.target, ColorShiftTarget::Background | ColorShiftTarget::Both) {
         if !shift.background_degrees.is_finite() {
             return Err(anyhow!("background hue shift must be finite"));
         }
-        let background_len = cell_count
-            .checked_mul(RGB_SIZE)
-            .ok_or_else(|| anyhow!("cframe background size overflow"))?;
-        if let Some(background_start) = background_payload_start(&output, body_end, background_len)
-        {
-            shift_rgb_triplets(
-                &mut output[background_start..background_start + background_len],
-                shift.background_degrees,
-            )?;
+        let background_len = cell_count.checked_mul(RGB_SIZE).ok_or_else(|| anyhow!("cframe background size overflow"))?;
+        if let Some(background_start) = background_payload_start(&output, body_end, background_len) {
+            shift_rgb_triplets(&mut output[background_start..background_start + background_len], shift.background_degrees)?;
         }
     }
 
@@ -141,22 +101,12 @@ pub fn cframe_has_background(data: &[u8]) -> Result<bool> {
     }
     let width = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
     let height = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
-    let cell_count = width
-        .checked_mul(height)
-        .ok_or_else(|| anyhow!("cframe dimensions overflow"))?;
-    let body_end = HEADER_SIZE
-        .checked_add(
-            cell_count
-                .checked_mul(CELL_SIZE)
-                .ok_or_else(|| anyhow!("cframe body size overflow"))?,
-        )
-        .ok_or_else(|| anyhow!("cframe body offset overflow"))?;
+    let cell_count = width.checked_mul(height).ok_or_else(|| anyhow!("cframe dimensions overflow"))?;
+    let body_end = HEADER_SIZE.checked_add(cell_count.checked_mul(CELL_SIZE).ok_or_else(|| anyhow!("cframe body size overflow"))?).ok_or_else(|| anyhow!("cframe body offset overflow"))?;
     if data.len() < body_end {
         return Err(anyhow!("cframe file truncated"));
     }
-    let background_len = cell_count
-        .checked_mul(RGB_SIZE)
-        .ok_or_else(|| anyhow!("cframe background size overflow"))?;
+    let background_len = cell_count.checked_mul(RGB_SIZE).ok_or_else(|| anyhow!("cframe background size overflow"))?;
     Ok(background_payload_start(data, body_end, background_len).is_some())
 }
 
@@ -194,11 +144,7 @@ fn shift_rgb(rgb: [u8; 3], degrees: f32) -> [u8; 3] {
     } else {
         60.0 * (((r - g) / delta) + 4.0)
     };
-    let saturation = if max <= f32::EPSILON {
-        0.0
-    } else {
-        delta / max
-    };
+    let saturation = if max <= f32::EPSILON {0.0} else {delta / max};
     let shifted_hue = (hue + degrees).rem_euclid(360.0);
     hsv_to_rgb(shifted_hue, saturation, max)
 }
@@ -216,11 +162,7 @@ fn hsv_to_rgb(hue: f32, saturation: f32, value: f32) -> [u8; 3] {
         _ => (chroma, 0.0, x),
     };
     let m = value - chroma;
-    [
-        ((r1 + m) * 255.0).round().clamp(0.0, 255.0) as u8,
-        ((g1 + m) * 255.0).round().clamp(0.0, 255.0) as u8,
-        ((b1 + m) * 255.0).round().clamp(0.0, 255.0) as u8,
-    ]
+    [((r1 + m) * 255.0).round().clamp(0.0, 255.0) as u8, ((g1 + m) * 255.0).round().clamp(0.0, 255.0) as u8, ((b1 + m) * 255.0).round().clamp(0.0, 255.0) as u8]
 }
 
 #[cfg(test)]

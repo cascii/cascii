@@ -19,9 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Configure conversion options
-    let conv_opts = ConversionOptions::default()
-        .with_font_ratio(0.5)
-        .with_luminance(20);
+    let conv_opts = ConversionOptions::default().with_font_ratio(0.5).with_luminance(20);
 
     // Convert video
     let input = Path::new("tests/video/input/test.mkv");

@@ -21,28 +21,13 @@ pub enum PreprocessInputKind {
     Directory,
 }
 
-pub const PREPROCESS_PRESETS: &[PreprocessPreset] = &[
-    PreprocessPreset { name: "contours", description: "Grayscale edge-detection with strong contrast (good for outlines).", filter: "format=gray,edgedetect=mode=colormix:high=0.2:low=0.05,eq=contrast=2.5:brightness=-0.1" },
-    PreprocessPreset { name: "contours-soft", description: "Softer contour extraction with less aggressive edges.", filter: "format=gray,edgedetect=mode=colormix:high=0.12:low=0.03,eq=contrast=2.0:brightness=-0.05" },
-    PreprocessPreset { name: "contours-strong", description: "Very sharp contour extraction for bold linework.", filter: "format=gray,edgedetect=mode=colormix:high=0.35:low=0.08,eq=contrast=3.2:brightness=-0.12" },
-    PreprocessPreset { name: "bw-contrast", description: "Simple grayscale + contrast boost for clean monochrome ASCII.", filter: "format=gray,eq=contrast=2.2:brightness=-0.08" },
-    PreprocessPreset { name: "noir-detail", description: "Grayscale sharpened look that emphasizes texture.", filter: "format=gray,unsharp=5:5:1.0:5:5:0.0,eq=contrast=1.8:brightness=-0.04" },
-    PreprocessPreset { name: "vivid", description: "Boost color saturation/contrast and sharpen for colorful ASCII.", filter: "eq=saturation=1.8:contrast=1.2:brightness=0.02,unsharp=5:5:0.8:5:5:0.0" },
-    PreprocessPreset { name: "warm-pop", description: "Warmer color balance with moderate saturation boost.", filter: "colorbalance=rs=0.06:gs=0.02:bs=-0.04,eq=saturation=1.35:contrast=1.12" },
-    PreprocessPreset { name: "cool-pop", description: "Cooler color balance with moderate saturation boost.", filter: "colorbalance=rs=-0.04:gs=0.02:bs=0.07,eq=saturation=1.28:contrast=1.10" },
-    PreprocessPreset { name: "soft-glow", description: "Gentle blur and color lift for smoother gradients.", filter: "gblur=sigma=1.0,eq=saturation=1.15:contrast=1.08:brightness=0.02" },
-    PreprocessPreset { name: "bg-white", description: "Key near-white backgrounds out before conversion (best on flat white backdrops).", filter: "format=rgba,colorkey=0xFFFFFF:0.12:0.03" },
-    PreprocessPreset { name: "bg-black", description: "Key near-black backgrounds out before conversion (best on flat black backdrops).", filter: "format=rgba,colorkey=0x000000:0.12:0.03" },
-];
+pub const PREPROCESS_PRESETS: &[PreprocessPreset] = &[PreprocessPreset {name: "contours", description: "Grayscale edge-detection with strong contrast (good for outlines).", filter: "format=gray,edgedetect=mode=colormix:high=0.2:low=0.05,eq=contrast=2.5:brightness=-0.1"}, PreprocessPreset {name: "contours-soft", description: "Softer contour extraction with less aggressive edges.", filter: "format=gray,edgedetect=mode=colormix:high=0.12:low=0.03,eq=contrast=2.0:brightness=-0.05"}, PreprocessPreset {name: "contours-strong", description: "Very sharp contour extraction for bold linework.", filter: "format=gray,edgedetect=mode=colormix:high=0.35:low=0.08,eq=contrast=3.2:brightness=-0.12"}, PreprocessPreset {name: "bw-contrast", description: "Simple grayscale + contrast boost for clean monochrome ASCII.", filter: "format=gray,eq=contrast=2.2:brightness=-0.08"}, PreprocessPreset {name: "noir-detail", description: "Grayscale sharpened look that emphasizes texture.", filter: "format=gray,unsharp=5:5:1.0:5:5:0.0,eq=contrast=1.8:brightness=-0.04"}, PreprocessPreset {name: "vivid", description: "Boost color saturation/contrast and sharpen for colorful ASCII.", filter: "eq=saturation=1.8:contrast=1.2:brightness=0.02,unsharp=5:5:0.8:5:5:0.0"}, PreprocessPreset {name: "warm-pop", description: "Warmer color balance with moderate saturation boost.", filter: "colorbalance=rs=0.06:gs=0.02:bs=-0.04,eq=saturation=1.35:contrast=1.12"}, PreprocessPreset {name: "cool-pop", description: "Cooler color balance with moderate saturation boost.", filter: "colorbalance=rs=-0.04:gs=0.02:bs=0.07,eq=saturation=1.28:contrast=1.10"}, PreprocessPreset {name: "soft-glow", description: "Gentle blur and color lift for smoother gradients.", filter: "gblur=sigma=1.0,eq=saturation=1.15:contrast=1.08:brightness=0.02"}, PreprocessPreset {name: "bg-white", description: "Key near-white backgrounds out before conversion (best on flat white backdrops).", filter: "format=rgba,colorkey=0xFFFFFF:0.12:0.03"}, PreprocessPreset {name: "bg-black", description: "Key near-black backgrounds out before conversion (best on flat black backdrops).", filter: "format=rgba,colorkey=0x000000:0.12:0.03"}];
 
 pub fn find_preprocess_preset(name: &str) -> Option<&'static PreprocessPreset> {
     PREPROCESS_PRESETS.iter().find(|preset| preset.name.eq_ignore_ascii_case(name))
 }
 
-pub fn resolve_preprocess_filter(
-    preprocess: Option<&str>,
-    preprocess_preset: Option<&str>,
-) -> Result<Option<String>> {
+pub fn resolve_preprocess_filter(preprocess: Option<&str>, preprocess_preset: Option<&str>) -> Result<Option<String>> {
     if let Some(filter) = preprocess {
         let filter = filter.trim();
         if filter.is_empty() {
@@ -90,11 +75,7 @@ pub fn detect_preprocess_input_kind(input: &Path) -> Result<PreprocessInputKind>
         return Err(anyhow!("Input path does not exist: {}", input.display()));
     }
 
-    let ext = input
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| ext.to_ascii_lowercase())
-        .unwrap_or_default();
+    let ext = input.extension().and_then(|ext| ext.to_str()).map(|ext| ext.to_ascii_lowercase()).unwrap_or_default();
 
     if matches!(ext.as_str(), "png" | "jpg" | "jpeg") {
         Ok(PreprocessInputKind::Image)
@@ -113,13 +94,7 @@ pub fn resolve_preprocess_output_path(input: &Path, output_target: &Path, kind: 
         return Ok(output_target.to_path_buf());
     }
 
-    let stem = input
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            anyhow!("Could not derive an output filename from {}", input.display())
-        })?;
+    let stem = input.file_stem().and_then(|s| s.to_str()).filter(|s| !s.is_empty()).ok_or_else(|| anyhow!("Could not derive an output filename from {}", input.display()))?;
 
     let ext = match kind {
         PreprocessInputKind::Image => "png",
@@ -172,21 +147,7 @@ pub fn preprocess_image_to_file(input: &Path, filter: &str, output: &Path, ffmpe
     ensure_output_parent(output)?;
     let filter_complex = build_standalone_filter_complex(filter, "rgb24")?;
 
-    let status = ProcCommand::new(ffmpeg_config.ffmpeg_cmd())
-        .arg("-loglevel")
-        .arg("error")
-        .arg("-y")
-        .arg("-i")
-        .arg(input)
-        .arg("-filter_complex")
-        .arg(&filter_complex)
-        .arg("-map")
-        .arg("[v]")
-        .arg("-frames:v")
-        .arg("1")
-        .arg(output)
-        .status()
-        .with_context(|| format!("running ffmpeg preprocessing on {}", input.display()))?;
+    let status = ProcCommand::new(ffmpeg_config.ffmpeg_cmd()).arg("-loglevel").arg("error").arg("-y").arg("-i").arg(input).arg("-filter_complex").arg(&filter_complex).arg("-map").arg("[v]").arg("-frames:v").arg("1").arg(output).status().with_context(|| format!("running ffmpeg preprocessing on {}", input.display()))?;
 
     if !status.success() {
         return Err(anyhow!("ffmpeg preprocessing failed for {}", input.display()));
@@ -198,66 +159,24 @@ pub fn preprocess_image_to_file(input: &Path, filter: &str, output: &Path, ffmpe
 pub fn preprocess_video_to_file(input: &Path, filter: &str, output: &Path, start: Option<&str>, end: Option<&str>, ffmpeg_config: &FfmpegConfig) -> Result<()> {
     ensure_output_parent(output)?;
 
-    let ext = output
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| ext.to_ascii_lowercase())
-        .unwrap_or_default();
+    let ext = output.extension().and_then(|ext| ext.to_str()).map(|ext| ext.to_ascii_lowercase()).unwrap_or_default();
     let filter_complex = build_standalone_filter_complex(filter, "yuv420p")?;
 
     let mut command = ProcCommand::new(ffmpeg_config.ffmpeg_cmd());
     command.arg("-loglevel").arg("error").arg("-y");
     apply_optional_time_range(&mut command, start, end);
     command.arg("-i").arg(input);
-    command
-        .arg("-filter_complex")
-        .arg(&filter_complex)
-        .arg("-map")
-        .arg("[v]")
-        .arg("-map")
-        .arg("0:a?");
+    command.arg("-filter_complex").arg(&filter_complex).arg("-map").arg("[v]").arg("-map").arg("0:a?");
 
     match ext.as_str() {
         "" | "mp4" | "m4v" | "mov" => {
-            command
-                .arg("-c:v")
-                .arg("libx264")
-                .arg("-crf")
-                .arg("18")
-                .arg("-preset")
-                .arg("medium")
-                .arg("-pix_fmt")
-                .arg("yuv420p")
-                .arg("-c:a")
-                .arg("aac")
-                .arg("-movflags")
-                .arg("+faststart");
+            command.arg("-c:v").arg("libx264").arg("-crf").arg("18").arg("-preset").arg("medium").arg("-pix_fmt").arg("yuv420p").arg("-c:a").arg("aac").arg("-movflags").arg("+faststart");
         }
         "mkv" => {
-            command
-                .arg("-c:v")
-                .arg("libx264")
-                .arg("-crf")
-                .arg("18")
-                .arg("-preset")
-                .arg("medium")
-                .arg("-pix_fmt")
-                .arg("yuv420p")
-                .arg("-c:a")
-                .arg("aac");
+            command.arg("-c:v").arg("libx264").arg("-crf").arg("18").arg("-preset").arg("medium").arg("-pix_fmt").arg("yuv420p").arg("-c:a").arg("aac");
         }
         "webm" => {
-            command
-                .arg("-c:v")
-                .arg("libvpx-vp9")
-                .arg("-crf")
-                .arg("30")
-                .arg("-b:v")
-                .arg("0")
-                .arg("-pix_fmt")
-                .arg("yuv420p")
-                .arg("-c:a")
-                .arg("libopus");
+            command.arg("-c:v").arg("libvpx-vp9").arg("-crf").arg("30").arg("-b:v").arg("0").arg("-pix_fmt").arg("yuv420p").arg("-c:a").arg("libopus");
         }
         _ => {
             return Err(anyhow!("Unsupported preprocess video output format '{}'. Use .mp4, .mov, .m4v, .mkv, or .webm.", output.display()));
@@ -279,7 +198,7 @@ pub struct TempFileGuard {
 
 impl TempFileGuard {
     pub fn new(path: PathBuf) -> Self {
-        Self { path }
+        Self {path}
     }
 
     pub fn path(&self) -> &Path {
@@ -303,8 +222,7 @@ pub fn preprocess_directory(source_dir: &Path, filter: &str, output_dir: &Path, 
         return Err(anyhow!("Source directory does not exist: {}", source_dir.display()));
     }
 
-    fs::create_dir_all(output_dir)
-        .with_context(|| format!("creating output directory {}", output_dir.display()))?;
+    fs::create_dir_all(output_dir).with_context(|| format!("creating output directory {}", output_dir.display()))?;
 
     let mut images: Vec<PathBuf> = Vec::new();
     for entry in fs::read_dir(source_dir).with_context(|| format!("reading directory {}", source_dir.display()))?.flatten() {
@@ -333,29 +251,10 @@ pub fn preprocess_directory(source_dir: &Path, filter: &str, output_dir: &Path, 
 }
 
 pub fn preprocess_image_to_temp(input: &Path, filter: &str, ffmpeg_config: &FfmpegConfig) -> Result<TempFileGuard> {
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let out_path = std::env::temp_dir().join(format!(
-        "cascii_preprocessed_{}_{}.png",
-        std::process::id(),
-        stamp
-    ));
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let out_path = std::env::temp_dir().join(format!("cascii_preprocessed_{}_{}.png", std::process::id(), stamp));
 
-    let status = ProcCommand::new(ffmpeg_config.ffmpeg_cmd())
-        .arg("-loglevel")
-        .arg("error")
-        .arg("-y")
-        .arg("-i")
-        .arg(input)
-        .arg("-vf")
-        .arg(filter)
-        .arg("-frames:v")
-        .arg("1")
-        .arg(&out_path)
-        .status()
-        .context("running ffmpeg preprocessing for image input")?;
+    let status = ProcCommand::new(ffmpeg_config.ffmpeg_cmd()).arg("-loglevel").arg("error").arg("-y").arg("-i").arg(input).arg("-vf").arg(filter).arg("-frames:v").arg("1").arg(&out_path).status().context("running ffmpeg preprocessing for image input")?;
 
     if !status.success() {
         return Err(anyhow!("ffmpeg image preprocessing failed"));
@@ -373,13 +272,7 @@ mod tests {
     use std::{env, fs};
 
     fn ffmpeg_available() -> bool {
-        Command::new("ffmpeg")
-            .arg("-version")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
+        Command::new("ffmpeg").arg("-version").stdout(Stdio::null()).stderr(Stdio::null()).status().map(|status| status.success()).unwrap_or(false)
     }
 
     fn temp_test_dir(label: &str) -> PathBuf {

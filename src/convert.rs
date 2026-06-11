@@ -44,7 +44,7 @@ pub(crate) fn image_to_ascii_frame_data_with_analysis(img_path: &Path, font_rati
     match cell_color_mode {
         CellColorMode::ForegroundOnly => {
             let (ascii_text, width_chars, height_chars, rgb_colors) = image_to_ascii_with_colors(img_path, font_ratio, threshold, columns, ascii_chars)?;
-            Ok(AsciiFrameData { ascii_text, width_chars, height_chars, rgb_colors, bg_rgb_colors: Vec::new() })
+            Ok(AsciiFrameData {ascii_text, width_chars, height_chars, rgb_colors, bg_rgb_colors: Vec::new()})
         }
         CellColorMode::FitForegroundBackground => match background_analysis {
             Some(BackgroundAnalysisContext::Legacy(background_analysis)) => render::fit_image_to_ascii_with_cell_backgrounds_with_context(img_path, font_ratio, threshold, bg_threshold, columns, background_analysis),
@@ -104,7 +104,7 @@ fn convert_image_to_ascii_with_analysis(img_path: &Path, out_txt: &Path, font_ra
 }
 
 fn write_frame_cframe(frame: &AsciiFrameData, path: &Path, cell_color_mode: CellColorMode) -> Result<()> {
-    let background = if frame.bg_rgb_colors.is_empty() { None } else { Some(frame.bg_rgb_colors.as_slice()) };
+    let background = if frame.bg_rgb_colors.is_empty() {None} else {Some(frame.bg_rgb_colors.as_slice())};
     if cell_color_mode == CellColorMode::FitForegroundBackgroundOptimized {
         write_cframe_binary_buffered(frame.width_chars, frame.height_chars, &frame.ascii_text, &frame.rgb_colors, background, path)
     } else {
@@ -113,9 +113,7 @@ fn write_frame_cframe(frame: &AsciiFrameData, path: &Path, cell_color_mode: Cell
 }
 
 pub(crate) fn image_to_ascii_string(img_path: &Path, font_ratio: f32, threshold: u8, columns: Option<u32>, ascii_chars: &[u8]) -> Result<String> {
-    let mut img = image::open(img_path)
-        .with_context(|| format!("opening {}", img_path.display()))?
-        .to_rgb8();
+    let mut img = image::open(img_path).with_context(|| format!("opening {}", img_path.display()))?.to_rgb8();
 
     let (orig_w, orig_h) = img.dimensions();
     let (target_w, target_h) = if let Some(cols) = columns {
@@ -250,12 +248,7 @@ fn write_cframe_binary_buffered(width: u32, height: u32, ascii_content: &str, rg
             return Err(anyhow!("ASCII payload contains more than {} cells", cell_count));
         }
         let color_offset = cell_index * 3;
-        output.extend_from_slice(&[
-            byte,
-            rgb_data[color_offset],
-            rgb_data[color_offset + 1],
-            rgb_data[color_offset + 2],
-        ]);
+        output.extend_from_slice(&[byte, rgb_data[color_offset], rgb_data[color_offset + 1], rgb_data[color_offset + 2]]);
         cell_index += 1;
     }
     if cell_index != cell_count {
@@ -368,31 +361,18 @@ pub(crate) fn convert_directory_parallel(src_dir: &Path, dst_dir: &Path, font_ra
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn convert_directory_parallel_with_progress<F>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, progress_callback: Option<F>, cancel: Option<&CancelToken>) -> Result<usize> where F: Fn(usize, usize) + Send + Sync {
+pub(crate) fn convert_directory_parallel_with_progress<F: Fn(usize, usize) + Send + Sync>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, progress_callback: Option<F>, cancel: Option<&CancelToken>) -> Result<usize> {
     convert_directory_parallel_with_progress_at_columns(src_dir, dst_dir, font_ratio, threshold, bg_threshold, None, keep_images, ascii_chars, output_mode, cell_color_mode, progress_callback, cancel)
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn convert_directory_parallel_optimized_with_progress<F>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: u32, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, progress_callback: Option<F>, cancel: Option<&CancelToken>) -> Result<usize> where F: Fn(usize, usize) + Send + Sync {
+pub(crate) fn convert_directory_parallel_optimized_with_progress<F: Fn(usize, usize) + Send + Sync>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: u32, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, progress_callback: Option<F>, cancel: Option<&CancelToken>) -> Result<usize> {
     let _ = columns;
-    convert_directory_parallel_with_progress_at_columns(
-        src_dir,
-        dst_dir,
-        font_ratio,
-        threshold,
-        bg_threshold,
-        None,
-        keep_images,
-        ascii_chars,
-        output_mode,
-        CellColorMode::FitForegroundBackgroundOptimized,
-        progress_callback,
-        cancel,
-    )
+    convert_directory_parallel_with_progress_at_columns(src_dir, dst_dir, font_ratio, threshold, bg_threshold, None, keep_images, ascii_chars, output_mode, CellColorMode::FitForegroundBackgroundOptimized, progress_callback, cancel)
 }
 
 #[allow(clippy::too_many_arguments)]
-fn convert_directory_parallel_with_progress_at_columns<F>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, progress_callback: Option<F>, cancel: Option<&CancelToken>) -> Result<usize> where F: Fn(usize, usize) + Send + Sync {
+fn convert_directory_parallel_with_progress_at_columns<F: Fn(usize, usize) + Send + Sync>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, progress_callback: Option<F>, cancel: Option<&CancelToken>) -> Result<usize> {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -432,31 +412,18 @@ fn convert_directory_parallel_with_progress_at_columns<F>(src_dir: &Path, dst_di
 
 /// Internal function for directory conversion with detailed Progress reporting
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn convert_directory_parallel_with_detailed_progress<F>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, progress_callback: &F, cancel: Option<&CancelToken>) -> Result<usize> where F: Fn(Progress) + Send + Sync {
+pub(crate) fn convert_directory_parallel_with_detailed_progress<F: Fn(Progress) + Send + Sync>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, progress_callback: &F, cancel: Option<&CancelToken>) -> Result<usize> {
     convert_directory_parallel_with_detailed_progress_at_columns(src_dir, dst_dir, font_ratio, threshold, bg_threshold, None, keep_images, ascii_chars, output_mode, cell_color_mode, progress_callback, cancel)
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn convert_directory_parallel_optimized_with_detailed_progress<F>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: u32, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, progress_callback: &F, cancel: Option<&CancelToken>) -> Result<usize> where F: Fn(Progress) + Send + Sync {
+pub(crate) fn convert_directory_parallel_optimized_with_detailed_progress<F: Fn(Progress) + Send + Sync>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: u32, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, progress_callback: &F, cancel: Option<&CancelToken>) -> Result<usize> {
     let _ = columns;
-    convert_directory_parallel_with_detailed_progress_at_columns(
-        src_dir,
-        dst_dir,
-        font_ratio,
-        threshold,
-        bg_threshold,
-        None,
-        keep_images,
-        ascii_chars,
-        output_mode,
-        CellColorMode::FitForegroundBackgroundOptimized,
-        progress_callback,
-        cancel,
-    )
+    convert_directory_parallel_with_detailed_progress_at_columns(src_dir, dst_dir, font_ratio, threshold, bg_threshold, None, keep_images, ascii_chars, output_mode, CellColorMode::FitForegroundBackgroundOptimized, progress_callback, cancel)
 }
 
 #[allow(clippy::too_many_arguments)]
-fn convert_directory_parallel_with_detailed_progress_at_columns<F>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, progress_callback: &F, cancel: Option<&CancelToken>) -> Result<usize> where F: Fn(Progress) + Send + Sync {
+fn convert_directory_parallel_with_detailed_progress_at_columns<F: Fn(Progress) + Send + Sync>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, progress_callback: &F, cancel: Option<&CancelToken>) -> Result<usize> {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -520,19 +487,8 @@ mod tests {
         let token = CancelToken::new();
         token.cancel(); // pre-cancel so the very first frame bails out
 
-        let err = convert_directory_parallel(
-            dir.path(),
-            dir.path(),
-            0.5,
-            20,
-            20,
-            true, // keep_images so we don't assert on cleanup
-            b" .:-=+*#%@",
-            &OutputMode::TextOnly,
-            CellColorMode::ForegroundOnly,
-            Some(&token),
-        )
-        .expect_err("a pre-cancelled token should make conversion fail");
+        // Keep images so cleanup does not affect the cancellation assertion.
+        let err = convert_directory_parallel(dir.path(), dir.path(), 0.5, 20, 20, true, b" .:-=+*#%@", &OutputMode::TextOnly, CellColorMode::ForegroundOnly, Some(&token)).expect_err("a pre-cancelled token should make conversion fail");
 
         assert!(crate::is_cancelled_error(&err), "expected Cancelled, got: {err}");
     }
@@ -545,19 +501,7 @@ mod tests {
             image::RgbImage::from_pixel(8, 8, image::Rgb([200, 200, 200])).save(&path).unwrap();
         }
 
-        let total = convert_directory_parallel(
-            dir.path(),
-            dir.path(),
-            0.5,
-            20,
-            20,
-            true,
-            b" .:-=+*#%@",
-            &OutputMode::TextOnly,
-            CellColorMode::ForegroundOnly,
-            None,
-        )
-        .expect("conversion without a token should succeed");
+        let total = convert_directory_parallel(dir.path(), dir.path(), 0.5, 20, 20, true, b" .:-=+*#%@", &OutputMode::TextOnly, CellColorMode::ForegroundOnly, None).expect("conversion without a token should succeed");
 
         assert_eq!(total, 3);
     }
