@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Context, Result};
-use cascii::loop_detect::run_find_loop;
+use cascii::loop_detect::{run_find_loop_with_options, LoopDetectionOptions, LoopMatchMode};
 use cascii::preprocessing::{
     detect_preprocess_input_kind, preprocess_directory, preprocess_image_to_file,
     preprocess_image_to_temp, preprocess_video_to_file, resolve_preprocess_filter,
@@ -9,7 +9,7 @@ use cascii::{
     crop_frames, run_trim, AppConfig, AsciiConverter, CellColorMode, ConversionOptions, OutputMode, Progress,
     ProgressPhase, ToVideoOptions, VideoOptions,
 };
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use dialoguer::{Confirm, FuzzySelect, Input};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::fs;
@@ -34,11 +34,7 @@ fn load_config() -> Result<AppConfig> {
 
             // Validate that ascii_chars contains only ASCII characters
             if !cfg.ascii_chars.is_ascii() {
-                return Err(anyhow!(
-                    "Config file {} contains non-ASCII characters in ascii_chars field. \
-                    This will cause corrupted output. Please use only ASCII characters.",
-                    p.display()
-                ));
+                return Err(anyhow!("Config file {} contains non-ASCII characters in ascii_chars field. This will cause corrupted output. Please use only ASCII characters.", p.display()));
             }
 
             return Ok(cfg);
@@ -53,6 +49,23 @@ fn load_config() -> Result<AppConfig> {
 enum Command {
     /// Uninstall cascii and remove associated data
     Uninstall,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum LoopModeArg {
+    ExactText,
+    VisualText,
+    VisualTextAndColor,
+}
+
+impl From<LoopModeArg> for LoopMatchMode {
+    fn from(value: LoopModeArg) -> Self {
+        match value {
+            LoopModeArg::ExactText => Self::ExactText,
+            LoopModeArg::VisualText => Self::VisualText,
+            LoopModeArg::VisualTextAndColor => Self::VisualTextAndColor,
+        }
+    }
 }
 
 #[derive(Parser, Debug)]
@@ -166,9 +179,25 @@ struct Args {
     #[arg(long, default_value_t = false)]
     list_preprocess_presets: bool,
 
-    /// Find repeated loops in a frames directory (frame_*.txt)
+    /// Find repeated loops in a frames directory (.txt, .cframe, or both)
     #[arg(long, default_value_t = false)]
     find_loop: bool,
+
+    /// Loop comparison mode
+    #[arg(long, value_enum, default_value = "visual-text")]
+    loop_mode: LoopModeArg,
+
+    /// Minimum distance between loop occurrences, in frames
+    #[arg(long)]
+    loop_min_distance: Option<usize>,
+
+    /// Number of neighboring frames used to validate a loop
+    #[arg(long)]
+    loop_window: Option<usize>,
+
+    /// Required loop similarity from 0.0 to 1.0
+    #[arg(long)]
+    loop_threshold: Option<f32>,
 
     /// Trim equally from all sides (overridden by directional trims)
     #[arg(long)]
@@ -219,17 +248,10 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let preprocess_filter = resolve_preprocess_filter(
-        args.preprocess.as_deref(),
-        args.preprocess_preset.as_deref(),
-    )?;
+    let preprocess_filter = resolve_preprocess_filter(args.preprocess.as_deref(), args.preprocess_preset.as_deref())?;
 
     // Handle trimming early and exit
-    let any_trim = args.trim.unwrap_or(0) > 0
-        || args.trim_left.unwrap_or(0) > 0
-        || args.trim_right.unwrap_or(0) > 0
-        || args.trim_top.unwrap_or(0) > 0
-        || args.trim_bottom.unwrap_or(0) > 0;
+    let any_trim = args.trim.unwrap_or(0) > 0 || args.trim_left.unwrap_or(0) > 0 || args.trim_right.unwrap_or(0) > 0 || args.trim_top.unwrap_or(0) > 0 || args.trim_bottom.unwrap_or(0) > 0;
     if any_trim {
         let input_path = match &args.input {
             Some(p) => p.clone(),
@@ -243,32 +265,13 @@ fn main() -> Result<()> {
 
         if let Some(output_dir) = &args.trim_output {
             if !input_path.is_dir() {
-                return Err(anyhow!(
-                    "--trim-output requires the input to be a directory"
-                ));
+                return Err(anyhow!("--trim-output requires the input to be a directory"));
             }
-            let result = crop_frames(
-                &input_path,
-                trim_top,
-                trim_bottom,
-                trim_left,
-                trim_right,
-                output_dir,
-            )?;
-            println!(
-                "Trim completed: left={}, right={}, top={}, bottom={} → {} frames written to {} ({}×{})",
-                trim_left, trim_right, trim_top, trim_bottom,
-                result.frame_count,
-                output_dir.display(),
-                result.new_width,
-                result.new_height,
-            );
+            let result = crop_frames(&input_path, trim_top, trim_bottom, trim_left, trim_right, output_dir)?;
+            println!("Trim completed: left={}, right={}, top={}, bottom={} → {} frames written to {} ({}×{})", trim_left, trim_right, trim_top, trim_bottom, result.frame_count, output_dir.display(), result.new_width, result.new_height);
         } else {
             run_trim(&input_path, trim_left, trim_right, trim_top, trim_bottom)?;
-            println!(
-                "Trim completed: left={}, right={}, top={}, bottom={}",
-                trim_left, trim_right, trim_top, trim_bottom
-            );
+            println!("Trim completed: left={}, right={}, top={}, bottom={}", trim_left, trim_right, trim_top, trim_bottom);
         }
         return Ok(());
     }
@@ -278,17 +281,26 @@ fn main() -> Result<()> {
         let input_path = match &args.input {
             Some(p) => p.clone(),
             None => {
-                return Err(anyhow!(
-                    "Input directory must be provided when using --find-loop"
-                ))
+                return Err(anyhow!("Input directory must be provided when using --find-loop"))
             }
         };
         if !input_path.is_dir() {
-            return Err(anyhow!(
-                "--find-loop expects a directory containing frame_*.txt files"
-            ));
+            return Err(anyhow!("--find-loop expects a directory containing frame_*.txt or frame_*.cframe files"));
         }
-        run_find_loop(&input_path)?;
+        let mut loop_options = LoopDetectionOptions {
+            mode: args.loop_mode.into(),
+            ..LoopDetectionOptions::default()
+        };
+        if let Some(minimum_distance) = args.loop_min_distance {
+            loop_options.minimum_distance = minimum_distance;
+        }
+        if let Some(validation_window) = args.loop_window {
+            loop_options.validation_window = validation_window;
+        }
+        if let Some(similarity_threshold) = args.loop_threshold {
+            loop_options.similarity_threshold = similarity_threshold;
+        }
+        run_find_loop_with_options(&input_path, &loop_options)?;
         return Ok(());
     }
 
@@ -301,11 +313,7 @@ fn main() -> Result<()> {
         if files.is_empty() {
             return Err(anyhow!("No media files found in current directory."));
         }
-        let selection = FuzzySelect::with_theme(&dialoguer::theme::ColorfulTheme::default())
-            .with_prompt("Choose an input file")
-            .default(0)
-            .items(&files)
-            .interact()?;
+        let selection = FuzzySelect::with_theme(&dialoguer::theme::ColorfulTheme::default()).with_prompt("Choose an input file").default(0).items(&files).interact()?;
         args.input = Some(PathBuf::from(&files[selection]));
     }
 
@@ -315,11 +323,7 @@ fn main() -> Result<()> {
         return Err(anyhow!("--preprocess-output requires --preprocess or --preprocess-preset"));
     }
 
-    let is_image_input = input_path.is_file()
-        && input_path
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg"));
+    let is_image_input = input_path.is_file() && input_path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg"));
 
     if let Some(ref filter) = preprocess_filter {
         if let Some(output_target) = args.preprocess_output.as_ref() {
@@ -430,14 +434,7 @@ fn main() -> Result<()> {
         fs::create_dir_all(&output_path).context("creating output dir")?;
 
         // Check if output directory already contains frames.
-        let has_frames = WalkDir::new(&output_path)
-            .min_depth(1)
-            .max_depth(1)
-            .into_iter()
-            .filter_map(Result::ok)
-            .any(|e| {
-                e.file_name().to_str().is_some_and(|s| s.starts_with("frame_"))
-            });
+        let has_frames = WalkDir::new(&output_path).min_depth(1).max_depth(1).into_iter().filter_map(Result::ok).any(|e| {e.file_name().to_str().is_some_and(|s| s.starts_with("frame_"))});
 
         if has_frames {
             if is_interactive && !Confirm::new().with_prompt(format!("Output directory {} already contains frames. Overwrite?", output_path.display())).default(false).interact()? {

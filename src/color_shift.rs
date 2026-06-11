@@ -46,7 +46,7 @@ impl ColorShift {
 }
 
 pub fn shift_rgb_triplets(rgb: &mut [u8], degrees: f32) -> Result<()> {
-    if rgb.len() % RGB_SIZE != 0 {
+    if !rgb.len().is_multiple_of(RGB_SIZE) {
         return Err(anyhow!(
             "RGB payload length must be divisible by 3, got {}",
             rgb.len()
@@ -162,7 +162,7 @@ pub fn cframe_has_background(data: &[u8]) -> Result<bool> {
 
 fn background_payload_start(data: &[u8], body_end: usize, background_len: usize) -> Option<usize> {
     let trailing = data.len().checked_sub(body_end)?;
-    if trailing >= background_len + 1 && (data[body_end] & CFRAME_EXT_FLAG_HAS_BG) != 0 {
+    if trailing > background_len && (data[body_end] & CFRAME_EXT_FLAG_HAS_BG) != 0 {
         Some(body_end + 1)
     } else if trailing == background_len {
         Some(body_end)
