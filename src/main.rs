@@ -1,14 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use cascii::loop_detect::{run_find_loop_with_options, LoopDetectionOptions, LoopMatchMode};
-use cascii::preprocessing::{
-    detect_preprocess_input_kind, preprocess_directory, preprocess_image_to_file,
-    preprocess_image_to_temp, preprocess_video_to_file, resolve_preprocess_filter,
-    resolve_preprocess_output_path, PreprocessInputKind, PREPROCESS_PRESETS,
-};
-use cascii::{
-    crop_frames, run_trim, AppConfig, AsciiConverter, CellColorMode, ConversionOptions, OutputMode, Progress,
-    ProgressPhase, ToVideoOptions, VideoOptions,
-};
+use cascii::preprocessing::{detect_preprocess_input_kind, preprocess_directory, preprocess_image_to_file, preprocess_image_to_temp, preprocess_video_to_file, resolve_preprocess_filter, resolve_preprocess_output_path, PreprocessInputKind, PREPROCESS_PRESETS};
+use cascii::{crop_frames, run_trim, AppConfig, AsciiConverter, CellColorMode, ConversionOptions, OutputMode, Progress, ProgressPhase, ToVideoOptions, VideoOptions};
 use clap::{Parser, Subcommand, ValueEnum};
 use dialoguer::{Confirm, FuzzySelect, Input};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -280,17 +273,12 @@ fn main() -> Result<()> {
     if args.find_loop {
         let input_path = match &args.input {
             Some(p) => p.clone(),
-            None => {
-                return Err(anyhow!("Input directory must be provided when using --find-loop"))
-            }
+            None => return Err(anyhow!("Input directory must be provided when using --find-loop")),
         };
         if !input_path.is_dir() {
             return Err(anyhow!("--find-loop expects a directory containing frame_*.txt or frame_*.cframe files"));
         }
-        let mut loop_options = LoopDetectionOptions {
-            mode: args.loop_mode.into(),
-            ..LoopDetectionOptions::default()
-        };
+        let mut loop_options = LoopDetectionOptions {mode: args.loop_mode.into(), ..LoopDetectionOptions::default()};
         if let Some(minimum_distance) = args.loop_min_distance {
             loop_options.minimum_distance = minimum_distance;
         }
@@ -434,7 +422,7 @@ fn main() -> Result<()> {
         fs::create_dir_all(&output_path).context("creating output dir")?;
 
         // Check if output directory already contains frames.
-        let has_frames = WalkDir::new(&output_path).min_depth(1).max_depth(1).into_iter().filter_map(Result::ok).any(|e| {e.file_name().to_str().is_some_and(|s| s.starts_with("frame_"))});
+        let has_frames = WalkDir::new(&output_path).min_depth(1).max_depth(1).into_iter().filter_map(Result::ok).any(|e| e.file_name().to_str().is_some_and(|s| s.starts_with("frame_")));
 
         if has_frames {
             if is_interactive && !Confirm::new().with_prompt(format!("Output directory {} already contains frames. Overwrite?", output_path.display())).default(false).interact()? {
@@ -477,15 +465,7 @@ fn main() -> Result<()> {
     }
 
     // Create conversion options
-    let conv_opts = ConversionOptions {
-        columns: Some(columns),
-        font_ratio,
-        luminance,
-        bg_luminance: args.bg_luminance,
-        ascii_chars: cfg.ascii_chars.clone(),
-        output_mode: output_mode.clone(),
-        cell_color_mode,
-    };
+    let conv_opts = ConversionOptions {columns: Some(columns), font_ratio, luminance, bg_luminance: args.bg_luminance, ascii_chars: cfg.ascii_chars.clone(), output_mode: output_mode.clone(), cell_color_mode};
 
     if input_path.is_file() {
         if is_image_input {
@@ -508,53 +488,51 @@ fn main() -> Result<()> {
             let pb_clone = Arc::clone(&progress_bar);
             let spinner_clone = Arc::clone(&spinner);
 
-            converter.convert_video_to_video(input_path, &video_opts, &conv_opts, &to_video_opts,
-                move |progress: Progress| {
-                    match progress.phase {
-                        ProgressPhase::ExtractingFrames => {
-                            let mut sp_guard = spinner_clone.lock().unwrap();
-                            if sp_guard.is_none() {
-                                let sp = ProgressBar::new_spinner();
-                                sp.set_style(ProgressStyle::default_spinner().template("{spinner:.green} {msg}").unwrap());
-                                sp.set_message("Extracting frames from video...");
-                                sp.enable_steady_tick(std::time::Duration::from_millis(100));
-                                *sp_guard = Some(sp);
-                            }
-                        }
-                        ProgressPhase::ExtractingAudio => {
-                            let mut sp_guard = spinner_clone.lock().unwrap();
-                            if let Some(sp) = sp_guard.take() {
-                                sp.finish_with_message("Frames extracted");
-                            }
+            converter.convert_video_to_video(input_path, &video_opts, &conv_opts, &to_video_opts, move |progress: Progress| {
+                match progress.phase {
+                    ProgressPhase::ExtractingFrames => {
+                        let mut sp_guard = spinner_clone.lock().unwrap();
+                        if sp_guard.is_none() {
                             let sp = ProgressBar::new_spinner();
                             sp.set_style(ProgressStyle::default_spinner().template("{spinner:.green} {msg}").unwrap());
-                            sp.set_message("Extracting audio...");
+                            sp.set_message("Extracting frames from video...");
                             sp.enable_steady_tick(std::time::Duration::from_millis(100));
                             *sp_guard = Some(sp);
                         }
-                        ProgressPhase::RenderingVideo => {
-                            // Finish spinner, switch to progress bar
-                            let mut sp_guard = spinner_clone.lock().unwrap();
-                            if let Some(sp) = sp_guard.take() {
-                                sp.finish_with_message("Extraction complete");
-                            }
-                            drop(sp_guard);
-
-                            let mut pb_guard = pb_clone.lock().unwrap();
-                            if pb_guard.is_none() && progress.total > 0 {
-                                let pb = ProgressBar::new(progress.total as u64);
-                                pb.set_style(ProgressStyle::default_bar().template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%)").unwrap().progress_chars("#>-"));
-                                pb.set_message("Rendering video");
-                                *pb_guard = Some(pb);
-                            }
-                            if let Some(ref pb) = *pb_guard {
-                                pb.set_position(progress.completed as u64);
-                            }
-                        }
-                        ProgressPhase::ConvertingFrames | ProgressPhase::Complete => {}
                     }
-                },
-            )?;
+                    ProgressPhase::ExtractingAudio => {
+                        let mut sp_guard = spinner_clone.lock().unwrap();
+                        if let Some(sp) = sp_guard.take() {
+                            sp.finish_with_message("Frames extracted");
+                        }
+                        let sp = ProgressBar::new_spinner();
+                        sp.set_style(ProgressStyle::default_spinner().template("{spinner:.green} {msg}").unwrap());
+                        sp.set_message("Extracting audio...");
+                        sp.enable_steady_tick(std::time::Duration::from_millis(100));
+                        *sp_guard = Some(sp);
+                    }
+                    ProgressPhase::RenderingVideo => {
+                        // Finish spinner, switch to progress bar
+                        let mut sp_guard = spinner_clone.lock().unwrap();
+                        if let Some(sp) = sp_guard.take() {
+                            sp.finish_with_message("Extraction complete");
+                        }
+                        drop(sp_guard);
+
+                        let mut pb_guard = pb_clone.lock().unwrap();
+                        if pb_guard.is_none() && progress.total > 0 {
+                            let pb = ProgressBar::new(progress.total as u64);
+                            pb.set_style(ProgressStyle::default_bar().template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%)").unwrap().progress_chars("#>-"));
+                            pb.set_message("Rendering video");
+                            *pb_guard = Some(pb);
+                        }
+                        if let Some(ref pb) = *pb_guard {
+                            pb.set_position(progress.completed as u64);
+                        }
+                    }
+                    ProgressPhase::ConvertingFrames | ProgressPhase::Complete => {}
+                }
+            })?;
 
             let pb_opt = progress_bar.lock().unwrap().take();
             if let Some(pb) = pb_opt {
@@ -571,58 +549,56 @@ fn main() -> Result<()> {
             let pb_clone = Arc::clone(&progress_bar);
             let spinner_clone = Arc::clone(&spinner);
 
-            converter.convert_video_with_detailed_progress(input_path, &output_path, &video_opts, &conv_opts, args.keep_images,
-                move |progress: Progress| {
-                    match progress.phase {
-                        ProgressPhase::ExtractingFrames => {
-                            // Show spinner for indeterminate extraction phase
-                            let mut sp_guard = spinner_clone.lock().unwrap();
-                            if sp_guard.is_none() {
-                                let sp = ProgressBar::new_spinner();
-                                sp.set_style(ProgressStyle::default_spinner().template("{spinner:.green} {msg}").unwrap());
-                                sp.set_message("Extracting frames from video...");
-                                sp.enable_steady_tick(std::time::Duration::from_millis(100));
-                                *sp_guard = Some(sp);
-                            }
-                        }
-                        ProgressPhase::ExtractingAudio => {
-                            // Finish spinner if running, show audio extraction
-                            let mut sp_guard = spinner_clone.lock().unwrap();
-                            if let Some(sp) = sp_guard.take() {
-                                sp.finish_with_message("Frames extracted");
-                            }
+            converter.convert_video_with_detailed_progress(input_path, &output_path, &video_opts, &conv_opts, args.keep_images, move |progress: Progress| {
+                match progress.phase {
+                    ProgressPhase::ExtractingFrames => {
+                        // Show spinner for indeterminate extraction phase
+                        let mut sp_guard = spinner_clone.lock().unwrap();
+                        if sp_guard.is_none() {
                             let sp = ProgressBar::new_spinner();
                             sp.set_style(ProgressStyle::default_spinner().template("{spinner:.green} {msg}").unwrap());
-                            sp.set_message("Extracting audio...");
+                            sp.set_message("Extracting frames from video...");
                             sp.enable_steady_tick(std::time::Duration::from_millis(100));
                             *sp_guard = Some(sp);
                         }
-                        ProgressPhase::ConvertingFrames => {
-                            // Finish spinner, switch to progress bar
-                            let mut sp_guard = spinner_clone.lock().unwrap();
-                            if let Some(sp) = sp_guard.take() {
-                                sp.finish_with_message("Extraction complete");
-                            }
-                            drop(sp_guard);
-
-                            let mut pb_guard = pb_clone.lock().unwrap();
-                            if pb_guard.is_none() && progress.total > 0 {
-                                // Initialize progress bar on first conversion callback
-                                let pb = ProgressBar::new(progress.total as u64);
-                                pb.set_style(ProgressStyle::default_bar().template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%)").unwrap().progress_chars("#>-"));
-                                pb.set_message("Converting frames");
-                                *pb_guard = Some(pb);
-                            }
-                            if let Some(ref pb) = *pb_guard {
-                                pb.set_position(progress.completed as u64);
-                            }
+                    }
+                    ProgressPhase::ExtractingAudio => {
+                        // Finish spinner if running, show audio extraction
+                        let mut sp_guard = spinner_clone.lock().unwrap();
+                        if let Some(sp) = sp_guard.take() {
+                            sp.finish_with_message("Frames extracted");
                         }
-                        ProgressPhase::RenderingVideo | ProgressPhase::Complete => {
-                            // Not used in non-to-video mode
+                        let sp = ProgressBar::new_spinner();
+                        sp.set_style(ProgressStyle::default_spinner().template("{spinner:.green} {msg}").unwrap());
+                        sp.set_message("Extracting audio...");
+                        sp.enable_steady_tick(std::time::Duration::from_millis(100));
+                        *sp_guard = Some(sp);
+                    }
+                    ProgressPhase::ConvertingFrames => {
+                        // Finish spinner, switch to progress bar
+                        let mut sp_guard = spinner_clone.lock().unwrap();
+                        if let Some(sp) = sp_guard.take() {
+                            sp.finish_with_message("Extraction complete");
+                        }
+                        drop(sp_guard);
+
+                        let mut pb_guard = pb_clone.lock().unwrap();
+                        if pb_guard.is_none() && progress.total > 0 {
+                            // Initialize progress bar on first conversion callback
+                            let pb = ProgressBar::new(progress.total as u64);
+                            pb.set_style(ProgressStyle::default_bar().template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%)").unwrap().progress_chars("#>-"));
+                            pb.set_message("Converting frames");
+                            *pb_guard = Some(pb);
+                        }
+                        if let Some(ref pb) = *pb_guard {
+                            pb.set_position(progress.completed as u64);
                         }
                     }
-                },
-            )?;
+                    ProgressPhase::RenderingVideo | ProgressPhase::Complete => {
+                        // Not used in non-to-video mode
+                    }
+                }
+            })?;
 
             // Finish the progress bar
             let pb_opt = progress_bar.lock().unwrap().take();
@@ -639,25 +615,20 @@ fn main() -> Result<()> {
             let progress_bar: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
             let pb_clone = Arc::clone(&progress_bar);
 
-            converter.render_frames_to_video(
-                input_path,
-                fps,
-                &to_video_opts,
-                move |progress: Progress| {
-                    if progress.phase == ProgressPhase::RenderingVideo {
-                        let mut pb_guard = pb_clone.lock().unwrap();
-                        if pb_guard.is_none() && progress.total > 0 {
-                            let pb = ProgressBar::new(progress.total as u64);
-                            pb.set_style(ProgressStyle::default_bar().template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%)").unwrap().progress_chars("#>-"));
-                            pb.set_message("Rendering video");
-                            *pb_guard = Some(pb);
-                        }
-                        if let Some(ref pb) = *pb_guard {
-                            pb.set_position(progress.completed as u64);
-                        }
+            converter.render_frames_to_video(input_path, fps, &to_video_opts, move |progress: Progress| {
+                if progress.phase == ProgressPhase::RenderingVideo {
+                    let mut pb_guard = pb_clone.lock().unwrap();
+                    if pb_guard.is_none() && progress.total > 0 {
+                        let pb = ProgressBar::new(progress.total as u64);
+                        pb.set_style(ProgressStyle::default_bar().template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%)").unwrap().progress_chars("#>-"));
+                        pb.set_message("Rendering video");
+                        *pb_guard = Some(pb);
                     }
-                },
-            )?;
+                    if let Some(ref pb) = *pb_guard {
+                        pb.set_position(progress.completed as u64);
+                    }
+                }
+            })?;
 
             let pb_opt = progress_bar.lock().unwrap().take();
             if let Some(pb) = pb_opt {
@@ -671,11 +642,7 @@ fn main() -> Result<()> {
             converter.convert_directory(input_path, &output_path, &conv_opts, args.keep_images)?;
 
             // For directory conversion, create details.toml manually since it doesn't go through video conversion
-            let frame_ext = if output_mode == OutputMode::ColorOnly {
-                "cframe"
-            } else {
-                "txt"
-            };
+            let frame_ext = if output_mode == OutputMode::ColorOnly {"cframe"} else {"txt"};
             let frame_count = WalkDir::new(&output_path).min_depth(1).max_depth(1).into_iter().filter_map(|e| e.ok()).filter(|e| e.path().extension().is_some_and(|ext| ext == frame_ext)).count();
 
             let mode_str = match output_mode {
@@ -684,7 +651,7 @@ fn main() -> Result<()> {
                 OutputMode::TextAndColor => "text+color",
             };
 
-            let result = cascii::ConversionResult {frame_count, columns, font_ratio, luminance, fps: None, output_mode: mode_str.to_string(), audio_extracted: false, output_dir: output_path.clone(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds: cell_color_mode.fits_cell_backgrounds(), cell_background_mode: cell_color_mode.as_str().to_string(), bg_luminance: args.bg_luminance.unwrap_or(luminance)};
+            let result = cascii::ConversionResult {frame_count, columns, font_ratio, luminance, fps: None, output_mode: mode_str.to_string(), audio_extracted: false, output_dir: output_path.clone(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds: cell_color_mode.fits_cell_backgrounds(), cell_background_mode: cell_color_mode.as_str().to_string(), bg_luminance: args.bg_luminance.unwrap_or(luminance), ascii_chars: conv_opts.ascii_chars.clone()};
 
             result.write_details_file().context("writing details file")?;
             let details = result.to_details_string();
@@ -704,12 +671,12 @@ fn main() -> Result<()> {
 }
 
 fn find_media_files() -> Result<Vec<String>> {
-    Ok(WalkDir::new(".").max_depth(1).into_iter().filter_map(|e| e.ok()).filter(|e| {e.path().is_file() && e.path().extension().is_some_and(|ext| {matches!(ext.to_str(), Some("mp4" | "mkv" | "mov" | "avi" | "webm" | "png" | "jpg"))})}).map(|e| e.path().to_str().unwrap_or("").to_string()).collect())
+    Ok(WalkDir::new(".").max_depth(1).into_iter().filter_map(|e| e.ok()).filter(|e| e.path().is_file() && e.path().extension().is_some_and(|ext| matches!(ext.to_str(), Some("mp4" | "mkv" | "mov" | "avi" | "webm" | "png" | "jpg")))).map(|e| e.path().to_str().unwrap_or("").to_string()).collect())
 }
 
 fn run_uninstall(is_interactive: bool) -> Result<()> {
     let bin_paths = vec!["/usr/local/bin/cascii", "/usr/local/bin/casci"]; // legacy symlink
-    let app_support = dirs::data_dir().unwrap_or_else(|| {PathBuf::from(format!("{}/Library/Application Support", std::env::var("HOME").unwrap_or_default()))}).join("cascii");
+    let app_support = dirs::data_dir().unwrap_or_else(|| PathBuf::from(format!("{}/Library/Application Support", std::env::var("HOME").unwrap_or_default()))).join("cascii");
 
     if is_interactive {
         let confirmed = Confirm::new().with_prompt("This will remove cascii and its app support directory. Continue?").default(false).interact()?;

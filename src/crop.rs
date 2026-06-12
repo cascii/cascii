@@ -35,10 +35,7 @@ pub fn crop_frames(source_dir: &Path, top: usize, bottom: usize, left: usize, ri
 
     // Collect and sort frame .txt files
     let mut txt_frames: Vec<PathBuf> = Vec::new();
-    for entry in fs::read_dir(source_dir)
-        .with_context(|| format!("reading directory {}", source_dir.display()))?
-        .flatten()
-    {
+    for entry in fs::read_dir(source_dir).with_context(|| format!("reading directory {}", source_dir.display()))?.flatten() {
         let path = entry.path();
         if path.is_file() {
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
@@ -78,8 +75,7 @@ pub fn crop_frames(source_dir: &Path, top: usize, bottom: usize, left: usize, ri
         let new_idx = idx + 1;
 
         // --- Crop .txt file ---
-        let content = fs::read_to_string(txt_path)
-            .with_context(|| format!("reading {}", txt_path.display()))?;
+        let content = fs::read_to_string(txt_path).with_context(|| format!("reading {}", txt_path.display()))?;
         let lines: Vec<&str> = content.lines().collect();
 
         let mut cropped_lines: Vec<String> = Vec::with_capacity(new_height as usize);
@@ -90,8 +86,7 @@ pub fn crop_frames(source_dir: &Path, top: usize, bottom: usize, left: usize, ri
         let cropped_text = cropped_lines.join("\n") + "\n";
 
         let out_txt = output_dir.join(format!("frame_{:04}.txt", new_idx));
-        fs::write(&out_txt, &cropped_text)
-            .with_context(|| format!("writing {}", out_txt.display()))?;
+        fs::write(&out_txt, &cropped_text).with_context(|| format!("writing {}", out_txt.display()))?;
         total_size += fs::metadata(&out_txt).map(|m| m.len()).unwrap_or(0);
 
         // --- Crop .cframe file (if exists) ---
@@ -103,11 +98,7 @@ pub fn crop_frames(source_dir: &Path, top: usize, bottom: usize, left: usize, ri
             let mut cropped_ascii = String::with_capacity((new_width as usize + 1) * new_height as usize);
             let mut cropped_rgb: Vec<u8> = Vec::with_capacity((new_width * new_height * 3) as usize);
             let has_bg = frame_data.bg_rgb_colors.len() == (frame_data.width_chars * frame_data.height_chars * 3) as usize;
-            let mut cropped_bg: Vec<u8> = if has_bg {
-                Vec::with_capacity((new_width * new_height * 3) as usize)
-            } else {
-                Vec::new()
-            };
+            let mut cropped_bg: Vec<u8> = if has_bg {Vec::with_capacity((new_width * new_height * 3) as usize)} else {Vec::new()};
 
             for row in top..(frame_height - bottom) {
                 for col in left..(frame_width - right) {
@@ -130,7 +121,7 @@ pub fn crop_frames(source_dir: &Path, top: usize, bottom: usize, left: usize, ri
             }
 
             let out_cframe = output_dir.join(format!("frame_{:04}.cframe", new_idx));
-            write_cframe_binary(new_width, new_height, &cropped_ascii, &cropped_rgb, if has_bg { Some(cropped_bg.as_slice()) } else { None }, &out_cframe)?;
+            write_cframe_binary(new_width, new_height, &cropped_ascii, &cropped_rgb, if has_bg {Some(cropped_bg.as_slice())} else {None}, &out_cframe)?;
             total_size += fs::metadata(&out_cframe).map(|m| m.len()).unwrap_or(0);
         }
     }
@@ -175,29 +166,15 @@ fn trim_file(path: &Path, trim_left: usize, trim_right: usize, trim_top: usize, 
     // Validate rectangular and strip potential trailing \r
     for (idx, line) in lines.iter().enumerate() {
         if line.chars().count() != width {
-            return Err(anyhow!(
-                "Non-rectangular frame at {} line {}",
-                path.display(),
-                idx + 1
-            ));
+            return Err(anyhow!("Non-rectangular frame at {} line {}", path.display(), idx + 1));
         }
     }
 
     if trim_top + trim_bottom >= height {
-        return Err(anyhow!(
-            "Trim rows exceed or equal file height ({} >= {}) for {}",
-            trim_top + trim_bottom,
-            height,
-            path.display()
-        ));
+        return Err(anyhow!("Trim rows exceed or equal file height ({} >= {}) for {}", trim_top + trim_bottom, height, path.display()));
     }
     if trim_left + trim_right >= width {
-        return Err(anyhow!(
-            "Trim columns exceed or equal file width ({} >= {}) for {}",
-            trim_left + trim_right,
-            width,
-            path.display()
-        ));
+        return Err(anyhow!("Trim columns exceed or equal file width ({} >= {}) for {}", trim_left + trim_right, width, path.display()));
     }
 
     // Apply vertical trims

@@ -87,7 +87,7 @@ pub(crate) fn get_video_duration_us(input: &Path, ffmpeg_config: &FfmpegConfig) 
 }
 
 /// Extract video frames with progress reporting
-pub(crate) fn extract_video_frames_with_progress<F>(input: &Path, out_dir: &Path, video_opts: &VideoOptions, ffmpeg_config: &FfmpegConfig, progress_callback: &F, cancel: Option<&CancelToken>) -> Result<()> where F: Fn(Progress) + Send + Sync {
+pub(crate) fn extract_video_frames_with_progress<F: Fn(Progress) + Send + Sync>(input: &Path, out_dir: &Path, video_opts: &VideoOptions, ffmpeg_config: &FfmpegConfig, progress_callback: &F, cancel: Option<&CancelToken>) -> Result<()> {
     let columns = video_opts.columns;
     let fps = video_opts.fps;
     let start = video_opts.start.as_deref();
@@ -194,7 +194,5 @@ pub(crate) fn extract_audio(input: &Path, out_dir: &Path, start: Option<&str>, e
 }
 
 pub(crate) fn parse_timestamp(s: &str) -> f64 {
-    s.split(':').rev().enumerate().fold(0.0, |acc, (i, v)| {
-        acc + v.parse::<f64>().unwrap_or(0.0) * 60f64.powi(i as i32)
-    })
+    s.split(':').rev().enumerate().fold(0.0, |acc, (i, v)| acc + v.parse::<f64>().unwrap_or(0.0) * 60f64.powi(i as i32))
 }

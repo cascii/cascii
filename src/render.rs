@@ -90,7 +90,7 @@ pub(crate) fn build_glyph_atlas(font_size: f32) -> Result<GlyphAtlas> {
         let det = s_aa * s_bb - s_ab * s_ab;
         let degenerate = mean_alpha <= 1e-6 || mean_alpha >= 1.0 - 1e-6 || det.abs() <= 1e-9;
 
-        glyphs.insert(byte, GlyphBitmap { alpha, s_aa, s_ab, s_bb, det, degenerate });
+        glyphs.insert(byte, GlyphBitmap {alpha, s_aa, s_ab, s_bb, det, degenerate});
     }
 
     Ok(GlyphAtlas {glyphs, cell_width, cell_height})
@@ -105,11 +105,15 @@ fn analysis_glyph_atlas() -> Result<&'static GlyphAtlas> {
 
 fn candidate_bytes_for_ascii_chars(ascii_chars: &[u8]) -> Vec<u8> {
     let candidate_bytes: Vec<u8> = ascii_chars.iter().copied().filter(|byte| *byte != b' ').collect();
-    if candidate_bytes.is_empty() { vec![b' '] } else { candidate_bytes }
+    if candidate_bytes.is_empty() {
+        vec![b' ']
+    } else {
+        candidate_bytes
+    }
 }
 
 pub(crate) fn background_analysis_context(ascii_chars: &[u8]) -> Result<BackgroundAnalysisContext> {
-    Ok(BackgroundAnalysisContext { atlas: analysis_glyph_atlas()?, candidate_bytes: candidate_bytes_for_ascii_chars(ascii_chars) })
+    Ok(BackgroundAnalysisContext {atlas: analysis_glyph_atlas()?, candidate_bytes: candidate_bytes_for_ascii_chars(ascii_chars)})
 }
 
 pub(crate) fn render_ascii_frame_to_rgb(frame: &AsciiFrameData, atlas: &GlyphAtlas, use_colors: bool) -> Vec<u8> {
@@ -302,7 +306,7 @@ pub(crate) fn fit_image_to_ascii_with_cell_backgrounds_with_context(img_path: &P
         ascii_text.push('\n');
     }
 
-    Ok(AsciiFrameData { ascii_text, width_chars, height_chars, rgb_colors, bg_rgb_colors })
+    Ok(AsciiFrameData {ascii_text, width_chars, height_chars, rgb_colors, bg_rgb_colors})
 }
 
 fn blend_channel(background: u8, foreground: u8, alpha: f32) -> u8 {
@@ -402,7 +406,7 @@ mod tests {
     #[test]
     fn renders_background_for_space_cells() -> Result<()> {
         let atlas = build_glyph_atlas(12.0)?;
-        let frame = AsciiFrameData { ascii_text: " \n".to_string(), width_chars: 1, height_chars: 1, rgb_colors: Vec::new(), bg_rgb_colors: vec![255, 0, 0] };
+        let frame = AsciiFrameData {ascii_text: " \n".to_string(), width_chars: 1, height_chars: 1, rgb_colors: Vec::new(), bg_rgb_colors: vec![255, 0, 0]};
         let buffer = render_ascii_frame_to_rgb(&frame, &atlas, false);
         assert!(buffer.chunks_exact(3).any(|pixel| pixel[0] > 200 && pixel[1] < 16 && pixel[2] < 16));
         Ok(())
@@ -411,7 +415,7 @@ mod tests {
     #[test]
     fn blends_foreground_glyph_over_background() -> Result<()> {
         let atlas = build_glyph_atlas(12.0)?;
-        let frame = AsciiFrameData { ascii_text: "M\n".to_string(), width_chars: 1, height_chars: 1, rgb_colors: vec![0, 255, 0], bg_rgb_colors: vec![0, 0, 255] };
+        let frame = AsciiFrameData {ascii_text: "M\n".to_string(), width_chars: 1, height_chars: 1, rgb_colors: vec![0, 255, 0], bg_rgb_colors: vec![0, 0, 255]};
         let buffer = render_ascii_frame_to_rgb(&frame, &atlas, true);
         assert!(buffer.chunks_exact(3).any(|pixel| pixel[1] == 0 && pixel[2] > 200));
         assert!(buffer.chunks_exact(3).any(|pixel| pixel[1] > 0 && pixel[2] < 255));

@@ -20,11 +20,7 @@
 //! // Convert a single image
 //! let converter = AsciiConverter::new();
 //! let options = ConversionOptions::default().with_columns(400);
-//! converter.convert_image(
-//!     Path::new("input.png"),
-//!     Path::new("output.txt"),
-//!     &options
-//! )?;
+//! converter.convert_image(Path::new("input.png"), Path::new("output.txt"), &options)?;
 //! # Ok(())
 //! # }
 //! ```
@@ -71,6 +67,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
+mod background_fit_optimized;
 pub mod color_shift;
 pub mod convert;
 pub mod crop;
@@ -78,7 +75,6 @@ pub mod loop_detect;
 pub mod preprocessing;
 pub mod render;
 pub mod video;
-mod background_fit_optimized;
 
 /// A cheap, clonable cancellation flag shared between a running conversion and
 /// the code that wants to stop it.
@@ -217,11 +213,7 @@ impl Progress {
 
     /// Create a progress update for extracting frames with percentage
     pub fn extracting_frames_progress(current_time_us: u64, total_duration_us: u64) -> Self {
-        let percentage = if total_duration_us > 0 {
-            (current_time_us as f64 / total_duration_us as f64) * 100.0
-        } else {
-            0.0
-        };
+        let percentage = if total_duration_us > 0 {(current_time_us as f64 / total_duration_us as f64) * 100.0} else {0.0};
         Self {phase: ProgressPhase::ExtractingFrames, completed: current_time_us as usize, total: total_duration_us as usize, percentage, message: format!("Extracting frames: {:.1}%", percentage)}
     }
 
@@ -232,21 +224,13 @@ impl Progress {
 
     /// Create a new progress update for frame conversion
     pub fn converting_frames(completed: usize, total: usize) -> Self {
-        let percentage = if total > 0 {
-            (completed as f64 / total as f64) * 100.0
-        } else {
-            0.0
-        };
+        let percentage = if total > 0 {(completed as f64 / total as f64) * 100.0} else {0.0};
         Self {phase: ProgressPhase::ConvertingFrames, completed, total, percentage, message: format!("Converting frame {} of {}", completed, total)}
     }
 
     /// Create a progress update for rendering video frames
     pub fn rendering_video(completed: usize, total: usize) -> Self {
-        let percentage = if total > 0 {
-            (completed as f64 / total as f64) * 100.0
-        } else {
-            0.0
-        };
+        let percentage = if total > 0 {(completed as f64 / total as f64) * 100.0} else {0.0};
         Self {phase: ProgressPhase::RenderingVideo, completed, total, percentage, message: format!("Rendering frame {} of {}", completed, total)}
     }
 
@@ -286,6 +270,8 @@ pub struct ConversionResult {
     pub cell_background_mode: String,
     /// Resolved background luminance threshold actually used by the bg-fit pass. Equal to `luminance` unless an explicit override was set via `ConversionOptions::with_bg_luminance`.
     pub bg_luminance: u8,
+    /// Character ramp used for glyph selection, from darkest to lightest.
+    pub ascii_chars: String,
 }
 
 fn default_cell_background_mode() -> String {
@@ -309,25 +295,12 @@ struct Details {
     fit_cell_backgrounds: bool,
     cell_background_mode: String,
     bg_luminance: u8,
+    ascii_chars: String,
 }
 
 impl ConversionResult {
     fn to_details(&self) -> Details {
-        Details {
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            frames: self.frame_count,
-            luminance: self.luminance,
-            font_ratio: self.font_ratio,
-            columns: self.columns,
-            fps: self.fps,
-            output: self.output_mode.clone(),
-            audio: self.audio_extracted,
-            background_color: self.background_color.clone(),
-            color: self.color.clone(),
-            fit_cell_backgrounds: self.fit_cell_backgrounds,
-            cell_background_mode: self.cell_background_mode.clone(),
-            bg_luminance: self.bg_luminance,
-        }
+        Details {version: env!("CARGO_PKG_VERSION").to_string(), frames: self.frame_count, luminance: self.luminance, font_ratio: self.font_ratio, columns: self.columns, fps: self.fps, output: self.output_mode.clone(), audio: self.audio_extracted, background_color: self.background_color.clone(), color: self.color.clone(), fit_cell_backgrounds: self.fit_cell_backgrounds, cell_background_mode: self.cell_background_mode.clone(), bg_luminance: self.bg_luminance, ascii_chars: self.ascii_chars.clone()}
     }
 
     /// Write the conversion details to a details.toml file in the output directory
@@ -525,15 +498,7 @@ impl ConversionOptions {
 
     /// Create options from a preset
     pub fn from_preset(preset: &Preset, ascii_chars: String) -> Self {
-        Self {
-            columns: Some(preset.columns),
-            font_ratio: preset.font_ratio,
-            luminance: preset.luminance,
-            bg_luminance: None,
-            ascii_chars,
-            output_mode: OutputMode::TextOnly,
-            cell_color_mode: CellColorMode::ForegroundOnly,
-        }
+        Self {columns: Some(preset.columns), font_ratio: preset.font_ratio, luminance: preset.luminance, bg_luminance: None, ascii_chars, output_mode: OutputMode::TextOnly, cell_color_mode: CellColorMode::ForegroundOnly}
     }
 }
 
@@ -558,14 +523,7 @@ pub struct VideoOptions {
 
 impl Default for VideoOptions {
     fn default() -> Self {
-        Self {
-            fps: 30,
-            start: None,
-            end: None,
-            columns: 400,
-            extract_audio: false,
-            preprocess_filter: None,
-        }
+        Self {fps: 30, start: None, end: None, columns: 400, extract_audio: false, preprocess_filter: None}
     }
 }
 
@@ -649,16 +607,11 @@ impl AsciiConverter {
 
     /// Load configuration from a file
     pub fn from_config_file(path: &Path) -> Result<Self> {
-        let text = fs::read_to_string(path)
-            .with_context(|| format!("reading config {}", path.display()))?;
+        let text = fs::read_to_string(path).with_context(|| format!("reading config {}", path.display()))?;
         let config: AppConfig = serde_json::from_str(&text).context("parsing config json")?;
 
         if !config.ascii_chars.is_ascii() {
-            return Err(anyhow!(
-                "Config file {} contains non-ASCII characters in ascii_chars field. \
-                This will cause corrupted output. Please use only ASCII characters.",
-                path.display()
-            ));
+            return Err(anyhow!("Config file {} contains non-ASCII characters in ascii_chars field. This will cause corrupted output. Please use only ASCII characters.", path.display()));
         }
 
         Ok(Self {config, ffmpeg_config: FfmpegConfig::default(), cancel_token: None})
@@ -691,11 +644,7 @@ impl AsciiConverter {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let converter = AsciiConverter::new();
     /// let options = ConversionOptions::default().with_columns(200);
-    /// converter.convert_image(
-    ///     Path::new("image.png"),
-    ///     Path::new("output.txt"),
-    ///     &options
-    /// )?;
+    /// converter.convert_image(Path::new("image.png"), Path::new("output.txt"), &options)?;
     /// # Ok(())
     /// # }
     /// ```
@@ -745,13 +694,7 @@ impl AsciiConverter {
     /// let converter = AsciiConverter::new();
     /// let video_opts = VideoOptions::default();
     /// let conv_opts = ConversionOptions::default();
-    /// converter.convert_video(
-    ///     Path::new("video.mp4"),
-    ///     Path::new("output_dir"),
-    ///     &video_opts,
-    ///     &conv_opts,
-    ///     false
-    /// )?;
+    /// converter.convert_video(Path::new("video.mp4"), Path::new("output_dir"), &video_opts, &conv_opts, false)?;
     /// # Ok(())
     /// # }
     /// ```
@@ -777,7 +720,7 @@ impl AsciiConverter {
     /// use std::path::Path;
     ///
     /// let converter = AsciiConverter::new();
-    /// let video_opts = VideoOptions { fps: 24, start: None, end: None, columns: 120, extract_audio: false, preprocess_filter: None };
+    /// let video_opts = VideoOptions {fps: 24, start: None, end: None, columns: 120, extract_audio: false, preprocess_filter: None};
     /// let conv_opts = ConversionOptions::default();
     ///
     /// converter.convert_video_with_progress(
@@ -791,7 +734,7 @@ impl AsciiConverter {
     ///     }),
     /// ).unwrap();
     /// ```
-    pub fn convert_video_with_progress<F>(&self, input: &Path, output_dir: &Path, video_opts: &VideoOptions, conv_opts: &ConversionOptions, keep_images: bool, progress_callback: Option<F>) -> Result<ConversionResult> where F: Fn(usize, usize) + Send + Sync {
+    pub fn convert_video_with_progress<F: Fn(usize, usize) + Send + Sync>(&self, input: &Path, output_dir: &Path, video_opts: &VideoOptions, conv_opts: &ConversionOptions, keep_images: bool, progress_callback: Option<F>) -> Result<ConversionResult> {
         fs::create_dir_all(output_dir).context("creating output directory")?;
 
         // Extract frames with ffmpeg
@@ -804,34 +747,16 @@ impl AsciiConverter {
         }
 
         // Convert frames to ASCII with progress callback
-        let total_frames = if conv_opts.cell_color_mode == CellColorMode::FitForegroundBackgroundOptimized {
-            convert::convert_directory_parallel_optimized_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), conv_opts.columns.unwrap_or(video_opts.columns), keep_images, ascii_chars, &conv_opts.output_mode, progress_callback, self.cancel_token.as_ref())?
-        } else {
-            convert::convert_directory_parallel_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), keep_images, ascii_chars, &conv_opts.output_mode, conv_opts.cell_color_mode, progress_callback, self.cancel_token.as_ref())?
-        };
+        let total_frames = if conv_opts.cell_color_mode == CellColorMode::FitForegroundBackgroundOptimized {convert::convert_directory_parallel_optimized_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), conv_opts.columns.unwrap_or(video_opts.columns), keep_images, ascii_chars, &conv_opts.output_mode, progress_callback, self.cancel_token.as_ref())?} else {convert::convert_directory_parallel_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), keep_images, ascii_chars, &conv_opts.output_mode, conv_opts.cell_color_mode, progress_callback, self.cancel_token.as_ref())?};
 
         // Build result with conversion details
         let output_mode_str = match conv_opts.output_mode {
-            OutputMode::TextOnly        => "text-only",
-            OutputMode::ColorOnly       => "color-only",
-            OutputMode::TextAndColor    => "text+color",
+            OutputMode::TextOnly => "text-only",
+            OutputMode::ColorOnly => "color-only",
+            OutputMode::TextAndColor => "text+color",
         };
 
-        let result = ConversionResult {
-            frame_count: total_frames,
-            columns: conv_opts.columns.unwrap_or(video_opts.columns),
-            font_ratio: conv_opts.font_ratio,
-            luminance: conv_opts.luminance,
-            fps: Some(video_opts.fps),
-            output_mode: output_mode_str.to_string(),
-            audio_extracted: video_opts.extract_audio,
-            output_dir: output_dir.to_path_buf(),
-            background_color: "black".to_string(),
-            color: "white".to_string(),
-            fit_cell_backgrounds: conv_opts.cell_color_mode.fits_cell_backgrounds(),
-            cell_background_mode: conv_opts.cell_color_mode.as_str().to_string(),
-            bg_luminance: conv_opts.resolve_bg_threshold(),
-        };
+        let result = ConversionResult {frame_count: total_frames, columns: conv_opts.columns.unwrap_or(video_opts.columns), font_ratio: conv_opts.font_ratio, luminance: conv_opts.luminance, fps: Some(video_opts.fps), output_mode: output_mode_str.to_string(), audio_extracted: video_opts.extract_audio, output_dir: output_dir.to_path_buf(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds: conv_opts.cell_color_mode.fits_cell_backgrounds(), cell_background_mode: conv_opts.cell_color_mode.as_str().to_string(), bg_luminance: conv_opts.resolve_bg_threshold(), ascii_chars: conv_opts.ascii_chars.clone()};
 
         // Write the details.toml file
         result.write_details_file()?;
@@ -891,7 +816,7 @@ impl AsciiConverter {
     ///     },
     /// ).unwrap();
     /// ```
-    pub fn convert_video_with_detailed_progress<F>(&self, input: &Path, output_dir: &Path, video_opts: &VideoOptions,conv_opts: &ConversionOptions, keep_images: bool, progress_callback: F) -> Result<ConversionResult> where F: Fn(Progress) + Send + Sync {
+    pub fn convert_video_with_detailed_progress<F: Fn(Progress) + Send + Sync>(&self, input: &Path, output_dir: &Path, video_opts: &VideoOptions, conv_opts: &ConversionOptions, keep_images: bool, progress_callback: F) -> Result<ConversionResult> {
         fs::create_dir_all(output_dir).context("creating output directory")?;
 
         // Phase 1: Extract frames from video with progress reporting
@@ -905,11 +830,7 @@ impl AsciiConverter {
         }
 
         // Phase 3: Convert frames to ASCII with progress
-        let total_frames = if conv_opts.cell_color_mode == CellColorMode::FitForegroundBackgroundOptimized {
-            convert::convert_directory_parallel_optimized_with_detailed_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), conv_opts.columns.unwrap_or(video_opts.columns), keep_images, ascii_chars, &conv_opts.output_mode, &progress_callback, self.cancel_token.as_ref())?
-        } else {
-            convert::convert_directory_parallel_with_detailed_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), keep_images, ascii_chars, &conv_opts.output_mode, conv_opts.cell_color_mode, &progress_callback, self.cancel_token.as_ref())?
-        };
+        let total_frames = if conv_opts.cell_color_mode == CellColorMode::FitForegroundBackgroundOptimized {convert::convert_directory_parallel_optimized_with_detailed_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), conv_opts.columns.unwrap_or(video_opts.columns), keep_images, ascii_chars, &conv_opts.output_mode, &progress_callback, self.cancel_token.as_ref())?} else {convert::convert_directory_parallel_with_detailed_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), keep_images, ascii_chars, &conv_opts.output_mode, conv_opts.cell_color_mode, &progress_callback, self.cancel_token.as_ref())?};
 
         // Phase 4: Complete
         progress_callback(Progress::complete(total_frames));
@@ -921,21 +842,7 @@ impl AsciiConverter {
             OutputMode::TextAndColor => "text+color",
         };
 
-        let result = ConversionResult {
-            frame_count: total_frames,
-            columns: conv_opts.columns.unwrap_or(video_opts.columns),
-            font_ratio: conv_opts.font_ratio,
-            luminance: conv_opts.luminance,
-            fps: Some(video_opts.fps),
-            output_mode: output_mode_str.to_string(),
-            audio_extracted: video_opts.extract_audio,
-            output_dir: output_dir.to_path_buf(),
-            background_color: "black".to_string(),
-            color: "white".to_string(),
-            fit_cell_backgrounds: conv_opts.cell_color_mode.fits_cell_backgrounds(),
-            cell_background_mode: conv_opts.cell_color_mode.as_str().to_string(),
-            bg_luminance: conv_opts.resolve_bg_threshold(),
-        };
+        let result = ConversionResult {frame_count: total_frames, columns: conv_opts.columns.unwrap_or(video_opts.columns), font_ratio: conv_opts.font_ratio, luminance: conv_opts.luminance, fps: Some(video_opts.fps), output_mode: output_mode_str.to_string(), audio_extracted: video_opts.extract_audio, output_dir: output_dir.to_path_buf(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds: conv_opts.cell_color_mode.fits_cell_backgrounds(), cell_background_mode: conv_opts.cell_color_mode.as_str().to_string(), bg_luminance: conv_opts.resolve_bg_threshold(), ascii_chars: conv_opts.ascii_chars.clone()};
 
         // Write the details.toml file
         result.write_details_file()?;
@@ -957,19 +864,7 @@ impl AsciiConverter {
         fs::create_dir_all(output_dir)?;
         let ascii_chars = options.ascii_chars.as_bytes();
         if options.cell_color_mode == CellColorMode::FitForegroundBackgroundOptimized {
-            convert::convert_directory_parallel_optimized_with_progress(
-                input_dir,
-                output_dir,
-                options.font_ratio,
-                options.luminance,
-                options.resolve_bg_threshold(),
-                options.columns.unwrap_or(400),
-                keep_images,
-                ascii_chars,
-                &options.output_mode,
-                None::<fn(usize, usize)>,
-                self.cancel_token.as_ref(),
-            )
+            convert::convert_directory_parallel_optimized_with_progress(input_dir, output_dir, options.font_ratio, options.luminance, options.resolve_bg_threshold(), options.columns.unwrap_or(400), keep_images, ascii_chars, &options.output_mode, None::<fn(usize, usize)>, self.cancel_token.as_ref())
         } else {
             convert::convert_directory_parallel(input_dir, output_dir, options.font_ratio, options.luminance, options.resolve_bg_threshold(), keep_images, ascii_chars, &options.output_mode, options.cell_color_mode, self.cancel_token.as_ref())
         }
@@ -1005,7 +900,7 @@ impl AsciiConverter {
     ///     },
     /// ).unwrap();
     /// ```
-    pub fn convert_directory_with_progress<F>(&self, input_dir: &Path, output_dir: &Path, options: &ConversionOptions, keep_images: bool, progress_callback: F) -> Result<usize> where F: Fn(Progress) + Send + Sync {
+    pub fn convert_directory_with_progress<F: Fn(Progress) + Send + Sync>(&self, input_dir: &Path, output_dir: &Path, options: &ConversionOptions, keep_images: bool, progress_callback: F) -> Result<usize> {
         fs::create_dir_all(output_dir)?;
         let ascii_chars = options.ascii_chars.as_bytes();
         convert::convert_directory_parallel_with_detailed_progress(input_dir, output_dir, options.font_ratio, options.luminance, options.resolve_bg_threshold(), keep_images, ascii_chars, &options.output_mode, options.cell_color_mode, &progress_callback, self.cancel_token.as_ref())
@@ -1018,9 +913,7 @@ impl AsciiConverter {
 
     /// Get conversion options from a preset name
     pub fn options_from_preset(&self, preset_name: &str) -> Result<ConversionOptions> {
-        let preset = self
-            .get_preset(preset_name)
-            .ok_or_else(|| anyhow!("Preset '{}' not found", preset_name))?;
+        let preset = self.get_preset(preset_name).ok_or_else(|| anyhow!("Preset '{}' not found", preset_name))?;
         Ok(ConversionOptions::from_preset(preset, self.config.ascii_chars.clone()))
     }
 
@@ -1029,7 +922,7 @@ impl AsciiConverter {
     /// Extracts frames from the input video, converts each to ASCII art,
     /// renders the ASCII characters to pixel buffers, and pipes them to
     /// ffmpeg to produce an output MP4 video.
-    pub fn convert_video_to_video<F>(&self, input: &Path, video_opts: &VideoOptions, conv_opts: &ConversionOptions, to_video_opts: &ToVideoOptions, progress_callback: F) -> Result<ConversionResult> where F: Fn(Progress) + Send + Sync {
+    pub fn convert_video_to_video<F: Fn(Progress) + Send + Sync>(&self, input: &Path, video_opts: &VideoOptions, conv_opts: &ConversionOptions, to_video_opts: &ToVideoOptions, progress_callback: F) -> Result<ConversionResult> {
         // Create temp directory for intermediate PNG frames
         let temp_dir = std::env::temp_dir().join(format!("cascii_tovideo_{}", std::process::id()));
         fs::create_dir_all(&temp_dir).context("creating temp directory")?;
@@ -1043,7 +936,7 @@ impl AsciiConverter {
         result
     }
 
-    fn convert_video_to_video_inner<F>(&self, input: &Path, video_opts: &VideoOptions, conv_opts: &ConversionOptions, to_video_opts: &ToVideoOptions, temp_dir: &Path, progress_callback: &F) -> Result<ConversionResult> where F: Fn(Progress) + Send + Sync {
+    fn convert_video_to_video_inner<F: Fn(Progress) + Send + Sync>(&self, input: &Path, video_opts: &VideoOptions, conv_opts: &ConversionOptions, to_video_opts: &ToVideoOptions, temp_dir: &Path, progress_callback: &F) -> Result<ConversionResult> {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::mpsc::sync_channel;
         use std::sync::Arc;
@@ -1063,14 +956,7 @@ impl AsciiConverter {
         };
 
         // Collect and sort PNG frame paths
-        let mut png_paths: Vec<PathBuf> = WalkDir::new(temp_dir)
-            .min_depth(1)
-            .max_depth(1)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .map(|e| e.into_path())
-            .filter(|p| p.extension().map(|e| e == "png").unwrap_or(false))
-            .collect();
+        let mut png_paths: Vec<PathBuf> = WalkDir::new(temp_dir).min_depth(1).max_depth(1).into_iter().filter_map(|e| e.ok()).map(|e| e.into_path()).filter(|p| p.extension().map(|e| e == "png").unwrap_or(false)).collect();
         png_paths.sort();
 
         let total_frames = png_paths.len();
@@ -1112,7 +998,7 @@ impl AsciiConverter {
                 for batch_start in (0..total_frames).step_by(batch_size) {
                     let batch_end = (batch_start + batch_size).min(total_frames);
                     let batch = &png_paths[batch_start..batch_end];
-                    let frame_data: Result<Vec<convert::AsciiFrameData>> = batch.par_iter().map(|path| {convert::image_to_ascii_frame_data_with_analysis(path, conv_opts.font_ratio, conv_opts.luminance, bg_threshold, conv_opts.columns, ascii_chars, conv_opts.cell_color_mode, background_analysis.as_ref())}).collect();
+                    let frame_data: Result<Vec<convert::AsciiFrameData>> = batch.par_iter().map(|path| convert::image_to_ascii_frame_data_with_analysis(path, conv_opts.font_ratio, conv_opts.luminance, bg_threshold, conv_opts.columns, ascii_chars, conv_opts.cell_color_mode, background_analysis.as_ref())).collect();
                     if sender.send(frame_data).is_err() {
                         return;
                     }
@@ -1142,11 +1028,7 @@ impl AsciiConverter {
 
                     let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
                     let current_percent = current.checked_mul(100).and_then(|value| value.checked_div(total_frames)).unwrap_or(0);
-                    let last_percent = if current > 1 {
-                        ((current - 1) * 100) / total_frames
-                    } else {
-                        0
-                    };
+                    let last_percent = if current > 1 {((current - 1) * 100) / total_frames} else {0};
 
                     if current_percent > last_percent || current == total_frames {
                         progress_callback(Progress::rendering_video(current, total_frames));
@@ -1171,33 +1053,19 @@ impl AsciiConverter {
         // Phase 7: Complete
         progress_callback(Progress::complete(total_frames));
         let output_mode_str = match conv_opts.output_mode {
-            OutputMode::TextOnly        => "text-only",
-            OutputMode::ColorOnly       => "color-only",
-            OutputMode::TextAndColor    => "text+color",
+            OutputMode::TextOnly => "text-only",
+            OutputMode::ColorOnly => "color-only",
+            OutputMode::TextAndColor => "text+color",
         };
 
-        Ok(ConversionResult {
-            frame_count: total_frames,
-            columns: conv_opts.columns.unwrap_or(video_opts.columns),
-            font_ratio: conv_opts.font_ratio,
-            luminance: conv_opts.luminance,
-            fps: Some(video_opts.fps),
-            output_mode: output_mode_str.to_string(),
-            audio_extracted: to_video_opts.mux_audio,
-            output_dir: to_video_opts.output_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
-            background_color: "black".to_string(),
-            color: "white".to_string(),
-            fit_cell_backgrounds: conv_opts.cell_color_mode.fits_cell_backgrounds(),
-            cell_background_mode: conv_opts.cell_color_mode.as_str().to_string(),
-            bg_luminance: conv_opts.resolve_bg_threshold(),
-        })
+        Ok(ConversionResult {frame_count: total_frames, columns: conv_opts.columns.unwrap_or(video_opts.columns), font_ratio: conv_opts.font_ratio, luminance: conv_opts.luminance, fps: Some(video_opts.fps), output_mode: output_mode_str.to_string(), audio_extracted: to_video_opts.mux_audio, output_dir: to_video_opts.output_path.parent().unwrap_or(Path::new(".")).to_path_buf(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds: conv_opts.cell_color_mode.fits_cell_backgrounds(), cell_background_mode: conv_opts.cell_color_mode.as_str().to_string(), bg_luminance: conv_opts.resolve_bg_threshold(), ascii_chars: conv_opts.ascii_chars.clone()})
     }
 
     /// Render existing ASCII frame files (.cframe or .txt) from a directory to a video file
     ///
     /// Scans the directory for .cframe files first; if none found, falls back to .txt files.
     /// Renders each frame using the glyph atlas and pipes to ffmpeg.
-    pub fn render_frames_to_video<F>(&self, input_dir: &Path, fps: u32, to_video_opts: &ToVideoOptions, progress_callback: F) -> Result<ConversionResult> where F: Fn(Progress) + Send + Sync {
+    pub fn render_frames_to_video<F: Fn(Progress) + Send + Sync>(&self, input_dir: &Path, fps: u32, to_video_opts: &ToVideoOptions, progress_callback: F) -> Result<ConversionResult> {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
 
@@ -1207,7 +1075,7 @@ impl AsciiConverter {
         let use_cframes = !frame_paths.is_empty();
 
         if !use_cframes {
-            frame_paths = WalkDir::new(input_dir).min_depth(1).max_depth(1).into_iter().filter_map(|e| e.ok()).map(|e| e.into_path()).filter(|p| {p.extension().map(|e| e == "txt").unwrap_or(false) && p.file_name().and_then(|n| n.to_str()).map(|n| n.starts_with("frame_")).unwrap_or(false)}).collect();
+            frame_paths = WalkDir::new(input_dir).min_depth(1).max_depth(1).into_iter().filter_map(|e| e.ok()).map(|e| e.into_path()).filter(|p| p.extension().map(|e| e == "txt").unwrap_or(false) && p.file_name().and_then(|n| n.to_str()).map(|n| n.starts_with("frame_")).unwrap_or(false)).collect();
         }
 
         frame_paths.sort();
@@ -1263,13 +1131,7 @@ impl AsciiConverter {
             let batch = &frame_paths[batch_start..batch_end];
 
             // Read batch in parallel
-            let frame_data: Vec<convert::AsciiFrameData> = batch.par_iter().map(|path| {
-                    if use_cframes {
-                        convert::read_cframe_to_frame_data(path)
-                    } else {
-                        convert::read_txt_to_frame_data(path)
-                    }
-                }).collect::<Result<Vec<_>>>()?;
+            let frame_data: Vec<convert::AsciiFrameData> = batch.par_iter().map(|path| if use_cframes {convert::read_cframe_to_frame_data(path)} else {convert::read_txt_to_frame_data(path)}).collect::<Result<Vec<_>>>()?;
 
             // Render and pipe sequentially
             for frame in &frame_data {
@@ -1283,11 +1145,7 @@ impl AsciiConverter {
 
                 let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
                 let current_percent = current.checked_mul(100).and_then(|value| value.checked_div(total_frames)).unwrap_or(0);
-                let last_percent = if current > 1 {
-                    ((current - 1) * 100) / total_frames
-                } else {
-                    0
-                };
+                let last_percent = if current > 1 {((current - 1) * 100) / total_frames} else {0};
 
                 if current_percent > last_percent || current == total_frames {
                     progress_callback(Progress::rendering_video(current, total_frames));
@@ -1305,24 +1163,10 @@ impl AsciiConverter {
 
         progress_callback(Progress::complete(total_frames));
 
-        let mode_str = if use_cframes { "color" } else { "text-only" };
+        let mode_str = if use_cframes {"color"} else {"text-only"};
 
         let fit_cell_backgrounds = first_frame.bg_rgb_colors.len() == (first_frame.width_chars * first_frame.height_chars * 3) as usize;
-        Ok(ConversionResult {
-            frame_count: total_frames,
-            columns: first_frame.width_chars,
-            font_ratio: 0.0,
-            luminance: 0,
-            fps: Some(fps),
-            output_mode: mode_str.to_string(),
-            audio_extracted: audio_path.is_some(),
-            output_dir: to_video_opts.output_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
-            background_color: "black".to_string(),
-            color: "white".to_string(),
-            fit_cell_backgrounds,
-            cell_background_mode: if fit_cell_backgrounds { "legacy" } else { "off" }.to_string(),
-            bg_luminance: 0,
-        })
+        Ok(ConversionResult {frame_count: total_frames, columns: first_frame.width_chars, font_ratio: 0.0, luminance: 0, fps: Some(fps), output_mode: mode_str.to_string(), audio_extracted: audio_path.is_some(), output_dir: to_video_opts.output_path.parent().unwrap_or(Path::new(".")).to_path_buf(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds, cell_background_mode: if fit_cell_backgrounds {"legacy"} else {"off"}.to_string(), bg_luminance: 0, ascii_chars: default_ascii_chars()})
     }
 }
 
