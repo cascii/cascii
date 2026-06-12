@@ -33,11 +33,8 @@ struct ConvertedRow {
     background: Vec<u8>,
 }
 
-pub(crate) fn background_analysis_context(
-    ascii_chars: &[u8],
-) -> Result<OptimizedBackgroundAnalysisContext> {
-    let font = FontRef::try_from_slice(FONT_DATA)
-        .map_err(|error| anyhow!("failed to load embedded font: {error}"))?;
+pub(crate) fn background_analysis_context(ascii_chars: &[u8]) -> Result<OptimizedBackgroundAnalysisContext> {
+    let font = FontRef::try_from_slice(FONT_DATA).map_err(|error| anyhow!("failed to load embedded font: {error}"))?;
     let scale = PxScale::from(ANALYSIS_FONT_SIZE);
     let scaled_font = font.as_scaled(scale);
     let cell_width = scaled_font.h_advance(font.glyph_id('M')).ceil() as u32;
@@ -46,9 +43,7 @@ pub(crate) fn background_analysis_context(
 
     let mut glyphs = Vec::with_capacity(ascii_chars.len());
     for &byte in ascii_chars.iter().filter(|byte| **byte != b' ') {
-        let glyph = font
-            .glyph_id(byte as char)
-            .with_scale_and_position(scale, ab_glyph::point(0.0, ascent));
+        let glyph = font.glyph_id(byte as char).with_scale_and_position(scale, ab_glyph::point(0.0, ascent));
         let mut alpha = vec![0.0f32; (cell_width * cell_height) as usize];
         if let Some(outlined) = font.outline_glyph(glyph) {
             outlined.draw(|x, y, coverage| {
@@ -72,73 +67,26 @@ pub(crate) fn background_analysis_context(
         }
         let mean_alpha = sum_alpha / alpha.len().max(1) as f64;
         let determinant = s_aa * s_bb - s_ab * s_ab;
-        glyphs.push(OptimizedGlyph {
-            byte,
-            alpha,
-            s_aa,
-            s_ab,
-            s_bb,
-            determinant,
-            degenerate: mean_alpha <= 1e-6
-                || mean_alpha >= 1.0 - 1e-6
-                || determinant.abs() <= 1e-9,
-        });
+        glyphs.push(OptimizedGlyph {byte, alpha, s_aa, s_ab, s_bb, determinant, degenerate: mean_alpha <= 1e-6 || mean_alpha >= 1.0 - 1e-6 || determinant.abs() <= 1e-9});
     }
 
     if glyphs.is_empty() {
-        glyphs.push(OptimizedGlyph {
-            byte: b' ',
-            alpha: vec![0.0; (cell_width * cell_height) as usize],
-            s_aa: 0.0,
-            s_ab: 0.0,
-            s_bb: (cell_width * cell_height) as f64,
-            determinant: 0.0,
-            degenerate: true,
-        });
+        glyphs.push(OptimizedGlyph {byte: b' ', alpha: vec![0.0; (cell_width * cell_height) as usize], s_aa: 0.0, s_ab: 0.0, s_bb: (cell_width * cell_height) as f64, determinant: 0.0, degenerate: true});
     }
 
-    Ok(OptimizedBackgroundAnalysisContext {
-        glyphs,
-        cell_width,
-        cell_height,
-    })
+    Ok(OptimizedBackgroundAnalysisContext {glyphs, cell_width, cell_height})
 }
 
-pub(crate) fn fit_image_to_ascii_with_cell_backgrounds(
-    image_path: &Path,
-    font_ratio: f32,
-    threshold: u8,
-    background_threshold: u8,
-    columns: Option<u32>,
-    ascii_chars: &[u8],
-) -> Result<AsciiFrameData> {
+pub(crate) fn fit_image_to_ascii_with_cell_backgrounds(image_path: &Path, font_ratio: f32, threshold: u8, background_threshold: u8, columns: Option<u32>, ascii_chars: &[u8]) -> Result<AsciiFrameData> {
     let context = background_analysis_context(ascii_chars)?;
-    fit_image_to_ascii_with_cell_backgrounds_with_context(
-        image_path,
-        font_ratio,
-        threshold,
-        background_threshold,
-        columns,
-        &context,
-    )
+    fit_image_to_ascii_with_cell_backgrounds_with_context(image_path, font_ratio, threshold, background_threshold, columns, &context)
 }
 
-pub(crate) fn fit_image_to_ascii_with_cell_backgrounds_with_context(
-    image_path: &Path,
-    font_ratio: f32,
-    threshold: u8,
-    background_threshold: u8,
-    columns: Option<u32>,
-    context: &OptimizedBackgroundAnalysisContext,
-) -> Result<AsciiFrameData> {
-    let mut image = image::open(image_path)
-        .with_context(|| format!("opening {}", image_path.display()))?
-        .to_rgb8();
+pub(crate) fn fit_image_to_ascii_with_cell_backgrounds_with_context(image_path: &Path, font_ratio: f32, threshold: u8, background_threshold: u8, columns: Option<u32>, context: &OptimizedBackgroundAnalysisContext) -> Result<AsciiFrameData> {
+    let mut image = image::open(image_path).with_context(|| format!("opening {}", image_path.display()))?.to_rgb8();
     let (original_width, original_height) = image.dimensions();
     let (width_chars, height_chars) = if let Some(columns) = columns {
-        let rows =
-            (original_height as f32 / original_width as f32 * columns as f32 * font_ratio).round()
-                as u32;
+        let rows = (original_height as f32 / original_width as f32 * columns as f32 * font_ratio).round() as u32;
         (columns, rows.max(1))
     } else {
         let rows = (original_height as f32 * font_ratio).round() as u32;
@@ -148,28 +96,10 @@ pub(crate) fn fit_image_to_ascii_with_cell_backgrounds_with_context(
     let target_width = width_chars * context.cell_width;
     let target_height = height_chars * context.cell_height;
     if image.dimensions() != (target_width, target_height) {
-        image = DynamicImage::ImageRgb8(image)
-            .resize_exact(
-                target_width,
-                target_height,
-                image::imageops::FilterType::Lanczos3,
-            )
-            .to_rgb8();
+        image = DynamicImage::ImageRgb8(image).resize_exact(target_width, target_height, image::imageops::FilterType::Lanczos3).to_rgb8();
     }
 
-    let rows: Vec<ConvertedRow> = (0..height_chars)
-        .into_par_iter()
-        .map(|row| {
-            convert_row(
-                &image,
-                row,
-                width_chars,
-                threshold,
-                background_threshold,
-                context,
-            )
-        })
-        .collect();
+    let rows: Vec<ConvertedRow> = (0..height_chars).into_par_iter().map(|row| convert_row(&image, row, width_chars, threshold, background_threshold, context)).collect();
 
     let cell_count = (width_chars * height_chars) as usize;
     let mut ascii_text = String::with_capacity(cell_count + height_chars as usize);
@@ -184,23 +114,10 @@ pub(crate) fn fit_image_to_ascii_with_cell_backgrounds_with_context(
         bg_rgb_colors.extend_from_slice(&row.background);
     }
 
-    Ok(AsciiFrameData {
-        ascii_text,
-        width_chars,
-        height_chars,
-        rgb_colors,
-        bg_rgb_colors,
-    })
+    Ok(AsciiFrameData {ascii_text, width_chars, height_chars, rgb_colors, bg_rgb_colors})
 }
 
-fn convert_row(
-    image: &image::RgbImage,
-    row: u32,
-    width_chars: u32,
-    threshold: u8,
-    background_threshold: u8,
-    context: &OptimizedBackgroundAnalysisContext,
-) -> ConvertedRow {
+fn convert_row(image: &image::RgbImage, row: u32, width_chars: u32, threshold: u8, background_threshold: u8, context: &OptimizedBackgroundAnalysisContext) -> ConvertedRow {
     let cell_pixels = (context.cell_width * context.cell_height) as usize;
     let mut ascii = Vec::with_capacity(width_chars as usize);
     let mut foreground = Vec::with_capacity(width_chars as usize * 3);
@@ -236,11 +153,7 @@ fn convert_row(
             continue;
         }
 
-        let average_rgb = [
-            (sum_rgb[0] / cell_pixels as u64) as u8,
-            (sum_rgb[1] / cell_pixels as u64) as u8,
-            (sum_rgb[2] / cell_pixels as u64) as u8,
-        ];
+        let average_rgb = [(sum_rgb[0] / cell_pixels as u64) as u8, (sum_rgb[1] / cell_pixels as u64) as u8, (sum_rgb[2] / cell_pixels as u64) as u8];
         if !emit_foreground {
             ascii.push(b' ');
             foreground.extend_from_slice(&[0, 0, 0]);
@@ -253,8 +166,7 @@ fn convert_row(
         let mut best_background = average_rgb;
         let mut best_error = f64::INFINITY;
         for glyph in &context.glyphs {
-            let (fitted_foreground, fitted_background, error) =
-                fit_colors(&patch, glyph, average_rgb);
+            let (fitted_foreground, fitted_background, error) = fit_colors(&patch, glyph, average_rgb);
             if error < best_error {
                 best_byte = glyph.byte;
                 best_foreground = fitted_foreground;
@@ -272,24 +184,12 @@ fn convert_row(
         }
     }
 
-    ConvertedRow {
-        ascii,
-        foreground,
-        background,
-    }
+    ConvertedRow {ascii, foreground, background}
 }
 
-fn fit_colors(
-    patch: &[Rgb<u8>],
-    glyph: &OptimizedGlyph,
-    average_rgb: [u8; 3],
-) -> ([u8; 3], [u8; 3], f64) {
+fn fit_colors(patch: &[Rgb<u8>], glyph: &OptimizedGlyph, average_rgb: [u8; 3]) -> ([u8; 3], [u8; 3], f64) {
     if glyph.degenerate {
-        return (
-            average_rgb,
-            average_rgb,
-            constant_patch_error(patch, average_rgb),
-        );
+        return (average_rgb, average_rgb, constant_patch_error(patch, average_rgb));
     }
 
     let mut sum_alpha_pixel = [0.0f64; 3];
@@ -307,12 +207,8 @@ fn fit_colors(
     let mut foreground = [0u8; 3];
     let mut background = [0u8; 3];
     for channel in 0..3 {
-        let foreground_value = (sum_alpha_pixel[channel] * glyph.s_bb
-            - sum_inverse_pixel[channel] * glyph.s_ab)
-            / glyph.determinant;
-        let background_value = (sum_inverse_pixel[channel] * glyph.s_aa
-            - sum_alpha_pixel[channel] * glyph.s_ab)
-            / glyph.determinant;
+        let foreground_value = (sum_alpha_pixel[channel] * glyph.s_bb - sum_inverse_pixel[channel] * glyph.s_ab) / glyph.determinant;
+        let background_value = (sum_inverse_pixel[channel] * glyph.s_aa - sum_alpha_pixel[channel] * glyph.s_ab) / glyph.determinant;
         foreground[channel] = foreground_value.clamp(0.0, 255.0).round() as u8;
         background[channel] = background_value.clamp(0.0, 255.0).round() as u8;
     }
@@ -322,8 +218,7 @@ fn fit_colors(
         let alpha = value as f64;
         let inverse = 1.0 - alpha;
         for channel in 0..3 {
-            let predicted =
-                alpha * foreground[channel] as f64 + inverse * background[channel] as f64;
+            let predicted = alpha * foreground[channel] as f64 + inverse * background[channel] as f64;
             let difference = predicted - pixel[channel] as f64;
             error += difference * difference;
         }
@@ -364,35 +259,13 @@ mod tests {
     fn optimized_output_matches_legacy_output() {
         let width = 37;
         let height = 29;
-        let image = image::RgbImage::from_fn(width, height, |x, y| {
-            Rgb([
-                ((x * 17 + y * 3) % 256) as u8,
-                ((x * 5 + y * 23) % 256) as u8,
-                ((x * 11 + y * 7) % 256) as u8,
-            ])
-        });
+        let image = image::RgbImage::from_fn(width, height, |x, y| Rgb([((x * 17 + y * 3) % 256) as u8, ((x * 5 + y * 23) % 256) as u8, ((x * 11 + y * 7) % 256) as u8]));
         let input = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         image.save_with_format(input.path(), image::ImageFormat::Png).unwrap();
         let ascii_chars = b" .:-=+*#%@";
 
-        let legacy = crate::render::fit_image_to_ascii_with_cell_backgrounds(
-            input.path(),
-            0.7,
-            20,
-            20,
-            Some(24),
-            ascii_chars,
-        )
-        .unwrap();
-        let optimized = fit_image_to_ascii_with_cell_backgrounds(
-            input.path(),
-            0.7,
-            20,
-            20,
-            Some(24),
-            ascii_chars,
-        )
-        .unwrap();
+        let legacy = crate::render::fit_image_to_ascii_with_cell_backgrounds(input.path(), 0.7, 20, 20, Some(24), ascii_chars).unwrap();
+        let optimized = fit_image_to_ascii_with_cell_backgrounds(input.path(), 0.7, 20, 20, Some(24), ascii_chars).unwrap();
 
         assert_eq!(optimized.ascii_text, legacy.ascii_text);
         assert_eq!(optimized.rgb_colors, legacy.rgb_colors);

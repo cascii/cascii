@@ -9,10 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let converter = AsciiConverter::new();
 
     // Configure conversion options
-    let options = ConversionOptions::default()
-        .with_columns(100)
-        .with_font_ratio(0.5)
-        .with_luminance(20);
+    let options = ConversionOptions::default().with_columns(100).with_font_ratio(0.5).with_luminance(20);
 
     // Example 1: Convert image to ASCII file
     let input = Path::new("resources/source.png");
@@ -23,20 +20,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         converter.convert_image(input, output, &options)?;
         println!("✓ ASCII art saved to {}", output.display());
     } else {
-        println!(
-            "Note: {} not found, skipping file conversion example",
-            input.display()
-        );
+        println!("Note: {} not found, skipping file conversion example", input.display());
     }
 
     // Example 2: Convert image to string (no file)
     if input.exists() {
         println!("\nConverting image to string...");
         let ascii_string = converter.image_to_string(input, &options)?;
-        println!(
-            "✓ Generated ASCII string ({} characters)",
-            ascii_string.len()
-        );
+        println!("✓ Generated ASCII string ({} characters)", ascii_string.len());
         println!("\nFirst 500 characters:");
         println!("{}", &ascii_string[..500.min(ascii_string.len())]);
     }
