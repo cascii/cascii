@@ -185,11 +185,20 @@ pub(crate) fn image_to_ascii_with_colors(img_path: &Path, font_ratio: f32, thres
 
 /// Trailing payload flag bits.
 ///
-/// Stored as the first byte of the optional extension area that follows the
-/// legacy `8 + w*h*4` block. Each bit announces an optional payload that
-/// follows in a fixed order (lowest bit = earliest payload). Adding a new
-/// payload is a forward-compatible change as long as the new bit is appended.
+/// Stored as the first byte of the optional extension area that follows the legacy `8 + w*h*4` block. Each bit announces an optional payload that
+/// follows in a fixed order (lowest bit = earliest payload). Adding a new payload is a forward-compatible change as long as the new bit is appended.
 pub(crate) const CFRAME_EXT_FLAG_HAS_BG: u8 = 0b0000_0001;
+
+/// Which part of a `.cframe` cell should be erased.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CframeEraseLayer {
+    /// Clear the glyph, foreground color, and background color.
+    All,
+    /// Clear only the glyph and foreground color, preserving any background payload.
+    Text,
+    /// Clear only the background payload, preserving glyphs and foreground colors.
+    Background,
+}
 
 /// Combined binary format (.cframe): text + color in one file.
 ///
@@ -200,10 +209,8 @@ pub(crate) const CFRAME_EXT_FLAG_HAS_BG: u8 = 0b0000_0001;
 ///    - `flags: u8` — bit 0 (`CFRAME_EXT_FLAG_HAS_BG`) announces a background payload
 ///    - if `flags & HAS_BG`: `width * height * 3` bytes of background RGB, row-major
 ///
-/// Older readers that don't know about the extension still parse the body
-/// correctly and ignore the trailing bytes. New readers detect the extension
-/// by looking past the legacy body for the `flags` byte instead of inferring
-/// payload presence from total file length.
+/// Older readers that don't know about the extension still parse the body correctly and ignore the trailing bytes. New readers detect the extension
+/// by looking past the legacy body for the `flags` byte instead of inferring payload presence from total file length.
 pub(crate) fn write_cframe_binary(width: u32, height: u32, ascii_content: &str, rgb_data: &[u8], bg_rgb_data: Option<&[u8]>, path: &Path) -> Result<()> {
     use std::io::Write;
     let mut file = fs::File::create(path).with_context(|| format!("creating cframe file {}", path.display()))?;
@@ -263,10 +270,8 @@ fn write_cframe_binary_buffered(width: u32, height: u32, ascii_content: &str, rg
 
 /// Read a .cframe binary file into AsciiFrameData.
 ///
-/// Recognises both the legacy fg-only layout and the new extension area. For
-/// backward compatibility with `.cframe` files written by older builds that
-/// appended the background payload **without** a leading flag byte, the reader
-/// also accepts an exact `width * height * 3` trailing block.
+/// Recognises both the legacy fg-only layout and the new extension area. For backward compatibility with `.cframe` files written by older builds that
+/// appended the background payload **without** a leading flag byte, the reader also accepts an exact `width * height * 3` trailing block.
 pub(crate) fn read_cframe_to_frame_data(path: &Path) -> Result<AsciiFrameData> {
     let data = fs::read(path).with_context(|| format!("reading cframe {}", path.display()))?;
     if data.len() < 8 {
@@ -313,6 +318,75 @@ pub(crate) fn read_cframe_to_frame_data(path: &Path) -> Result<AsciiFrameData> {
     }
 
     Ok(AsciiFrameData {ascii_text, width_chars: width, height_chars: height, rgb_colors, bg_rgb_colors})
+}
+
+fn cframe_background_range(data: &[u8], body_end: usize, background_len: usize) -> Option<std::ops::Range<usize>> {
+    let trailing = data.len().saturating_sub(body_end);
+    if trailing > background_len && (data[body_end] & CFRAME_EXT_FLAG_HAS_BG) != 0 {
+        let start = body_end + 1;
+        Some(start..start + background_len)
+    } else if trailing == background_len {
+        Some(body_end..body_end + background_len)
+    } else {
+        None
+    }
+}
+
+/// Erase selected cells in a raw `.cframe` payload while preserving unrelated channels. Returns `Ok(None)` when no selected cell changes the payload.
+pub fn erase_cframe_cells(data: &[u8], cells: &[(usize, usize)], layer: CframeEraseLayer) -> Result<Option<Vec<u8>>> {
+    if data.len() < 8 {
+        return Err(anyhow!("cframe file too small"));
+    }
+
+    let width = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+    let height = u32::from_le_bytes([data[4], data[5], data[6], data[7]]) as usize;
+    let cell_count = width.checked_mul(height).ok_or_else(|| anyhow!("cframe dimensions overflow"))?;
+    let body_len = cell_count.checked_mul(4).ok_or_else(|| anyhow!("cframe body size overflow"))?;
+    let body_end = 8usize.checked_add(body_len).ok_or_else(|| anyhow!("cframe body offset overflow"))?;
+    if data.len() < body_end {
+        return Err(anyhow!("cframe file truncated"));
+    }
+
+    let background_len = cell_count.checked_mul(3).ok_or_else(|| anyhow!("cframe background size overflow"))?;
+    let background_range = cframe_background_range(data, body_end, background_len);
+    if layer == CframeEraseLayer::Background && background_range.is_none() {
+        return Ok(None);
+    }
+
+    let mut output = data.to_vec();
+    let mut modified = false;
+
+    for &(row, col) in cells {
+        if row >= height || col >= width {
+            continue;
+        }
+
+        let cell_index = row * width + col;
+        if matches!(layer, CframeEraseLayer::All | CframeEraseLayer::Text) {
+            let offset = 8 + cell_index * 4;
+            if output[offset] != b' ' || output[offset + 1] != 0 || output[offset + 2] != 0 || output[offset + 3] != 0 {
+                output[offset] = b' ';
+                output[offset + 1] = 0;
+                output[offset + 2] = 0;
+                output[offset + 3] = 0;
+                modified = true;
+            }
+        }
+
+        if matches!(layer, CframeEraseLayer::All | CframeEraseLayer::Background) {
+            if let Some(range) = background_range.as_ref() {
+                let offset = range.start + cell_index * 3;
+                if output[offset] != 0 || output[offset + 1] != 0 || output[offset + 2] != 0 {
+                    output[offset] = 0;
+                    output[offset + 1] = 0;
+                    output[offset + 2] = 0;
+                    modified = true;
+                }
+            }
+        }
+    }
+
+    Ok(modified.then_some(output))
 }
 
 /// Read a .txt ASCII frame file into AsciiFrameData (white-on-black, no color)
@@ -589,5 +663,42 @@ mod tests {
         let frame = read_cframe_to_frame_data(tmp.path()).unwrap();
         assert_eq!(frame.rgb_colors, vec![10, 20, 30, 40, 50, 60]);
         assert_eq!(frame.bg_rgb_colors, bg);
+    }
+
+    #[test]
+    fn erase_cframe_text_preserves_background() {
+        let text = ascii_content_for(2, 1, &[b'A', b'B']);
+        let rgb = vec![10, 20, 30, 40, 50, 60];
+        let bg = vec![100, 110, 120, 130, 140, 150];
+        let tmp = NamedTempFile::new().unwrap();
+        write_cframe_binary(2, 1, &text, &rgb, Some(&bg), tmp.path()).unwrap();
+        let raw = fs::read(tmp.path()).unwrap();
+
+        let erased = erase_cframe_cells(&raw, &[(0, 1)], CframeEraseLayer::Text).unwrap().unwrap();
+        let frame = read_cframe_to_frame_data_from_bytes_for_test(&erased);
+
+        assert_eq!(&erased[12..16], &[b' ', 0, 0, 0]);
+        assert_eq!(frame.bg_rgb_colors, bg);
+    }
+
+    #[test]
+    fn erase_cframe_background_preserves_text_and_foreground() {
+        let text = ascii_content_for(2, 1, &[b'A', b'B']);
+        let rgb = vec![10, 20, 30, 40, 50, 60];
+        let bg = vec![100, 110, 120, 130, 140, 150];
+        let tmp = NamedTempFile::new().unwrap();
+        write_cframe_binary(2, 1, &text, &rgb, Some(&bg), tmp.path()).unwrap();
+        let raw = fs::read(tmp.path()).unwrap();
+
+        let erased = erase_cframe_cells(&raw, &[(0, 0)], CframeEraseLayer::Background).unwrap().unwrap();
+        assert_eq!(&erased[8..16], &raw[8..16]);
+        assert_eq!(&erased[17..20], &[0, 0, 0]);
+        assert_eq!(&erased[20..23], &[130, 140, 150]);
+    }
+
+    fn read_cframe_to_frame_data_from_bytes_for_test(data: &[u8]) -> AsciiFrameData {
+        let tmp = NamedTempFile::new().unwrap();
+        fs::write(tmp.path(), data).unwrap();
+        read_cframe_to_frame_data(tmp.path()).unwrap()
     }
 }
