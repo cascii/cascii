@@ -1,7 +1,10 @@
 use anyhow::{anyhow, Context, Result};
 use image::DynamicImage;
 use rayon::prelude::*;
+use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -429,6 +432,70 @@ fn char_for(luma: u8, threshold: u8, ascii_chars: &[u8]) -> char {
     ascii_chars[idx] as char
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct DedupPlan {
+    representatives: Vec<usize>,
+    duplicates: Vec<(usize, usize)>,
+}
+
+fn hash_bytes(bytes: &[u8]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn dedup_buckets(pngs: &[PathBuf]) -> DedupPlan {
+    let mut representatives = Vec::new();
+    let mut duplicates = Vec::new();
+    let mut buckets: HashMap<u64, Vec<(usize, Vec<u8>)>> = HashMap::new();
+
+    for (idx, path) in pngs.iter().enumerate() {
+        let bytes = match fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                representatives.push(idx);
+                continue;
+            }
+        };
+        let hash = hash_bytes(&bytes);
+        let bucket = buckets.entry(hash).or_default();
+
+        if let Some((rep_idx, _)) = bucket.iter().find(|(_, rep_bytes)| rep_bytes == &bytes) {
+            duplicates.push((idx, *rep_idx));
+        } else {
+            representatives.push(idx);
+            bucket.push((idx, bytes));
+        }
+    }
+
+    DedupPlan { representatives, duplicates }
+}
+
+fn outputs_for_stem(dst_dir: &Path, stem: &str, output_mode: &OutputMode) -> Vec<PathBuf> {
+    match output_mode {
+        OutputMode::TextOnly => vec![dst_dir.join(format!("{stem}.txt"))],
+        OutputMode::ColorOnly => vec![dst_dir.join(format!("{stem}.cframe"))],
+        OutputMode::TextAndColor => vec![dst_dir.join(format!("{stem}.txt")), dst_dir.join(format!("{stem}.cframe"))],
+    }
+}
+
+fn file_stem_str(path: &Path) -> Result<&str> {
+    path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| anyhow!("bad file name"))
+}
+
+fn copy_duplicate_outputs(dst_dir: &Path, pngs: &[PathBuf], duplicate_idx: usize, representative_idx: usize, output_mode: &OutputMode) -> Result<()> {
+    let duplicate_stem = file_stem_str(&pngs[duplicate_idx])?;
+    let representative_stem = file_stem_str(&pngs[representative_idx])?;
+    let representative_outputs = outputs_for_stem(dst_dir, representative_stem, output_mode);
+    let duplicate_outputs = outputs_for_stem(dst_dir, duplicate_stem, output_mode);
+
+    for (src, dst) in representative_outputs.iter().zip(duplicate_outputs.iter()) {
+        fs::copy(src, dst).with_context(|| format!("copying duplicate output {} -> {}", src.display(), dst.display()))?;
+    }
+
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn convert_directory_parallel(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, cancel: Option<&CancelToken>) -> Result<usize> {
     convert_directory_parallel_with_progress(src_dir, dst_dir, font_ratio, threshold, bg_threshold, keep_images, ascii_chars, output_mode, cell_color_mode, None::<fn(usize, usize)>, cancel)
@@ -457,16 +524,32 @@ fn convert_directory_parallel_with_progress_at_columns<F: Fn(usize, usize) + Sen
     let total = pngs.len();
     let completed = Arc::new(AtomicUsize::new(0));
     let background_analysis = background_analysis_for_mode(ascii_chars, cell_color_mode)?;
+    let dedup_plan = dedup_buckets(&pngs);
 
-    pngs.par_iter().try_for_each(|img_path| -> Result<()> {
+    dedup_plan.representatives.par_iter().try_for_each(|&idx| -> Result<()> {
         if cancel.is_some_and(|c| c.is_cancelled()) {
             return Err(Cancelled.into());
         }
-        let file_stem = img_path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| anyhow!("bad file name"))?;
+        let img_path = &pngs[idx];
+        let file_stem = file_stem_str(img_path)?;
         let out_txt = dst_dir.join(format!("{}.txt", file_stem));
         convert_image_to_ascii_with_analysis(img_path, &out_txt, font_ratio, threshold, bg_threshold, columns, ascii_chars, output_mode, cell_color_mode, background_analysis.as_ref())?;
 
         // Update progress
+        let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
+        if let Some(ref callback) = progress_callback {
+            callback(current, total);
+        }
+
+        Ok(())
+    })?;
+
+    dedup_plan.duplicates.par_iter().try_for_each(|&(duplicate_idx, representative_idx)| -> Result<()> {
+        if cancel.is_some_and(|c| c.is_cancelled()) {
+            return Err(Cancelled.into());
+        }
+        copy_duplicate_outputs(dst_dir, &pngs, duplicate_idx, representative_idx, output_mode)?;
+
         let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
         if let Some(ref callback) = progress_callback {
             callback(current, total);
@@ -509,15 +592,17 @@ fn convert_directory_parallel_with_detailed_progress_at_columns<F: Fn(Progress) 
     let completed = Arc::new(AtomicUsize::new(0));
     let last_reported_percent = Arc::new(AtomicUsize::new(0));
     let background_analysis = background_analysis_for_mode(ascii_chars, cell_color_mode)?;
+    let dedup_plan = dedup_buckets(&pngs);
 
     // Report initial progress
     progress_callback(Progress::converting_frames(0, total));
 
-    pngs.par_iter().try_for_each(|img_path| -> Result<()> {
+    dedup_plan.representatives.par_iter().try_for_each(|&idx| -> Result<()> {
         if cancel.is_some_and(|c| c.is_cancelled()) {
             return Err(Cancelled.into());
         }
-        let file_stem = img_path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| anyhow!("bad file name"))?;
+        let img_path = &pngs[idx];
+        let file_stem = file_stem_str(img_path)?;
         let out_txt = dst_dir.join(format!("{}.txt", file_stem));
         convert_image_to_ascii_with_analysis(img_path, &out_txt, font_ratio, threshold, bg_threshold, columns, ascii_chars, output_mode, cell_color_mode, background_analysis.as_ref())?;
 
@@ -527,6 +612,24 @@ fn convert_directory_parallel_with_detailed_progress_at_columns<F: Fn(Progress) 
         let last_percent = last_reported_percent.load(Ordering::SeqCst);
 
         // Only report if percentage changed (throttle to ~100 updates max)
+        if current_percent > last_percent || current == total {
+            last_reported_percent.store(current_percent, Ordering::SeqCst);
+            progress_callback(Progress::converting_frames(current, total));
+        }
+
+        Ok(())
+    })?;
+
+    dedup_plan.duplicates.par_iter().try_for_each(|&(duplicate_idx, representative_idx)| -> Result<()> {
+        if cancel.is_some_and(|c| c.is_cancelled()) {
+            return Err(Cancelled.into());
+        }
+        copy_duplicate_outputs(dst_dir, &pngs, duplicate_idx, representative_idx, output_mode)?;
+
+        let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
+        let current_percent = current.checked_mul(100).and_then(|value| value.checked_div(total)).unwrap_or(0);
+        let last_percent = last_reported_percent.load(Ordering::SeqCst);
+
         if current_percent > last_percent || current == total {
             last_reported_percent.store(current_percent, Ordering::SeqCst);
             progress_callback(Progress::converting_frames(current, total));
@@ -547,6 +650,8 @@ fn convert_directory_parallel_with_detailed_progress_at_columns<F: Fn(Progress) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
     use tempfile::NamedTempFile;
 
     #[test]
@@ -578,6 +683,62 @@ mod tests {
         let total = convert_directory_parallel(dir.path(), dir.path(), 0.5, 20, 20, true, b" .:-=+*#%@", &OutputMode::TextOnly, CellColorMode::ForegroundOnly, None).expect("conversion without a token should succeed");
 
         assert_eq!(total, 3);
+    }
+
+    #[test]
+    fn dedup_buckets_groups_adjacent_and_non_adjacent_identical_pngs() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = ["frame_0000.png", "frame_0001.png", "frame_0002.png", "frame_0003.png"].into_iter().map(|name| dir.path().join(name)).collect::<Vec<_>>();
+
+        fs::write(&paths[0], b"red").unwrap();
+        fs::write(&paths[1], b"green").unwrap();
+        fs::write(&paths[2], b"red").unwrap();
+        fs::write(&paths[3], b"red").unwrap();
+
+        let plan = dedup_buckets(&paths);
+
+        assert_eq!(plan.representatives, vec![0, 1]);
+        assert_eq!(plan.duplicates, vec![(2, 0), (3, 0)]);
+    }
+
+    #[test]
+    fn convert_directory_copies_outputs_for_duplicate_pngs() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        let colors = [image::Rgb([220, 0, 0]), image::Rgb([0, 220, 0]), image::Rgb([220, 0, 0]), image::Rgb([220, 0, 0])];
+        for (i, color) in colors.into_iter().enumerate() {
+            let path = src.path().join(format!("frame_{:04}.png", i));
+            image::RgbImage::from_pixel(8, 8, color).save(&path).unwrap();
+        }
+
+        let last_progress = Arc::new(AtomicUsize::new(0));
+        let progress = Arc::clone(&last_progress);
+        let total = convert_directory_parallel_with_progress(
+            src.path(),
+            dst.path(),
+            0.5,
+            20,
+            20,
+            true,
+            b" .:-=+*#%@",
+            &OutputMode::TextAndColor,
+            CellColorMode::ForegroundOnly,
+            Some(move |current, _total| {
+                progress.store(current, Ordering::SeqCst);
+            }),
+            None,
+        )
+        .expect("deduplicated conversion should succeed");
+
+        assert_eq!(total, 4);
+        assert_eq!(last_progress.load(Ordering::SeqCst), 4);
+        for ext in ["txt", "cframe"] {
+            let original = fs::read(dst.path().join(format!("frame_0000.{ext}"))).unwrap();
+            let non_adjacent_duplicate = fs::read(dst.path().join(format!("frame_0002.{ext}"))).unwrap();
+            let adjacent_duplicate = fs::read(dst.path().join(format!("frame_0003.{ext}"))).unwrap();
+            assert_eq!(non_adjacent_duplicate, original);
+            assert_eq!(adjacent_duplicate, original);
+        }
     }
 
     fn ascii_content_for(width: u32, height: u32, chars: &[u8]) -> String {
