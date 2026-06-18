@@ -72,6 +72,7 @@ pub mod color_shift;
 pub mod convert;
 pub mod crop;
 pub mod loop_detect;
+pub mod packed;
 pub mod preprocessing;
 pub mod render;
 pub mod video;
