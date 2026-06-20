@@ -542,11 +542,13 @@ pub struct ToVideoOptions {
     /// Override color rendering: `Some(true)` forces per-character colors from .cframe data,
     /// `Some(false)` forces monochrome white-on-black, `None` auto-detects from file types.
     pub use_colors: Option<bool>,
+    /// Text stroke width in pixels for rendering thicker glyphs.
+    pub text_stroke_width: f32,
 }
 
 impl Default for ToVideoOptions {
     fn default() -> Self {
-        Self {output_path: PathBuf::from("output.mp4"), font_size: 14.0, crf: 18, mux_audio: false, use_colors: None}
+        Self {output_path: PathBuf::from("output.mp4"), font_size: 14.0, crf: 18, mux_audio: false, use_colors: None, text_stroke_width: 0.0}
     }
 }
 
@@ -966,7 +968,7 @@ impl AsciiConverter {
         }
 
         // Phase 3: Build glyph atlas
-        let atlas = render::build_glyph_atlas(to_video_opts.font_size)?;
+        let atlas = render::build_glyph_atlas_with_stroke(to_video_opts.font_size, to_video_opts.text_stroke_width)?;
 
         // Phase 4: Convert first frame to determine output resolution
         let background_analysis = convert::background_analysis_for_mode(ascii_chars, conv_opts.cell_color_mode)?;
@@ -1087,7 +1089,7 @@ impl AsciiConverter {
         }
 
         // Build glyph atlas
-        let atlas = render::build_glyph_atlas(to_video_opts.font_size)?;
+        let atlas = render::build_glyph_atlas_with_stroke(to_video_opts.font_size, to_video_opts.text_stroke_width)?;
 
         // Read first frame to determine pixel dimensions
         let first_frame = if use_cframes {
