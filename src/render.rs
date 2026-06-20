@@ -41,6 +41,10 @@ pub(crate) struct BackgroundAnalysisContext {
 }
 
 pub(crate) fn build_glyph_atlas(font_size: f32) -> Result<GlyphAtlas> {
+    build_glyph_atlas_with_stroke(font_size, 0.0)
+}
+
+pub(crate) fn build_glyph_atlas_with_stroke(font_size: f32, text_stroke_width: f32) -> Result<GlyphAtlas> {
     use ab_glyph::Font;
 
     let font = FontRef::try_from_slice(FONT_DATA).map_err(|e| anyhow!("failed to load embedded font: {}", e))?;
@@ -74,6 +78,8 @@ pub(crate) fn build_glyph_atlas(font_size: f32) -> Result<GlyphAtlas> {
             });
         }
 
+        thicken_glyph_alpha(&mut alpha, cell_width, cell_height, text_stroke_width);
+
         let mut s_aa = 0.0f64;
         let mut s_ab = 0.0f64;
         let mut s_bb = 0.0f64;
@@ -94,6 +100,53 @@ pub(crate) fn build_glyph_atlas(font_size: f32) -> Result<GlyphAtlas> {
     }
 
     Ok(GlyphAtlas {glyphs, cell_width, cell_height})
+}
+
+fn thicken_glyph_alpha(alpha: &mut [f32], cell_width: u32, cell_height: u32, text_stroke_width: f32) {
+    let radius = text_stroke_width.clamp(0.0, 1.5);
+    if radius <= 0.0 || cell_width == 0 || cell_height == 0 {
+        return;
+    }
+
+    let source = alpha.to_vec();
+    let radius_px = radius.ceil() as i32;
+    let radius_squared = f64::from(radius) * f64::from(radius);
+
+    for y in 0..cell_height as i32 {
+        for x in 0..cell_width as i32 {
+            let mut coverage = source[(y as u32 * cell_width + x as u32) as usize];
+
+            for dy in -radius_px..=radius_px {
+                for dx in -radius_px..=radius_px {
+                    if dx == 0 && dy == 0 {
+                        continue;
+                    }
+
+                    let distance_squared = f64::from(dx * dx + dy * dy);
+                    if distance_squared > radius_squared + 0.0001 {
+                        continue;
+                    }
+
+                    let sx = x + dx;
+                    let sy = y + dy;
+                    if sx < 0 || sy < 0 || sx >= cell_width as i32 || sy >= cell_height as i32 {
+                        continue;
+                    }
+
+                    let neighbor = source[(sy as u32 * cell_width + sx as u32) as usize];
+                    let distance = distance_squared.sqrt() as f32;
+                    let strength = if radius >= distance {
+                        1.0
+                    } else {
+                        (radius / distance).clamp(0.0, 1.0)
+                    };
+                    coverage = coverage.max(neighbor * strength);
+                }
+            }
+
+            alpha[(y as u32 * cell_width + x as u32) as usize] = coverage;
+        }
+    }
 }
 
 fn analysis_glyph_atlas() -> Result<&'static GlyphAtlas> {

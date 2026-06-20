@@ -480,7 +480,7 @@ fn main() -> Result<()> {
             converter.convert_image(image_input, &output_path.join(format!("{}.txt", input_path.file_stem().unwrap().to_str().unwrap())), &conv_opts)?;
         } else if args.to_video {
             let video_opts = VideoOptions {fps, start: args.start.clone(), end: args.end.clone(), columns, extract_audio: args.audio, preprocess_filter: preprocess_filter.clone()};
-            let to_video_opts = ToVideoOptions {output_path: video_output_path.clone(), font_size: args.video_font_size, crf: args.crf, mux_audio: args.audio, use_colors: None};
+            let to_video_opts = ToVideoOptions {output_path: video_output_path.clone(), font_size: args.video_font_size, crf: args.crf, mux_audio: args.audio, use_colors: None, text_stroke_width: 0.0};
 
             // Create progress bar for multi-phase progress
             let progress_bar: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
@@ -611,7 +611,7 @@ fn main() -> Result<()> {
             if cell_color_mode.fits_cell_backgrounds() {
                 eprintln!("note: cell-background fitting flags have no effect when rendering an existing frame directory; backgrounds already stored in .cframe files are preserved automatically.");
             }
-            let to_video_opts = ToVideoOptions {output_path: video_output_path.clone(), font_size: args.video_font_size, crf: args.crf, mux_audio: args.audio, use_colors: None};
+            let to_video_opts = ToVideoOptions {output_path: video_output_path.clone(), font_size: args.video_font_size, crf: args.crf, mux_audio: args.audio, use_colors: None, text_stroke_width: 0.0};
             let progress_bar: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
             let pb_clone = Arc::clone(&progress_bar);
 
