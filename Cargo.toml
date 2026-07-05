@@ -1,6 +1,6 @@
 [package]
 name = "cascii"
-version = "0.28.0"
+version = "0.28.1"
 edition = "2021"
 authors = ["cascii contributors"]
 description = "High-performance ASCII art generator for images and videos"
@@ -45,3 +45,7 @@ toml = "0.8"
 
 [dev-dependencies]
 tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

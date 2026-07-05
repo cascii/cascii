@@ -96,7 +96,7 @@ pub(crate) fn fit_image_to_ascii_with_cell_backgrounds_with_context(image_path: 
     let target_width = width_chars * context.cell_width;
     let target_height = height_chars * context.cell_height;
     if image.dimensions() != (target_width, target_height) {
-        image = DynamicImage::ImageRgb8(image).resize_exact(target_width, target_height, image::imageops::FilterType::Lanczos3).to_rgb8();
+        image = DynamicImage::ImageRgb8(image).resize_exact(target_width, target_height, image::imageops::FilterType::Triangle).to_rgb8();
     }
 
     let rows: Vec<ConvertedRow> = (0..height_chars).into_par_iter().map(|row| convert_row(&image, row, width_chars, threshold, background_threshold, context)).collect();
@@ -125,8 +125,9 @@ fn convert_row(image: &image::RgbImage, row: u32, width_chars: u32, threshold: u
     let mut patch = vec![Rgb([0u8; 3]); cell_pixels];
 
     for column in 0..width_chars {
-        let mut total_luminance = 0.0f64;
+        let mut total_luminance = 0u64;
         let mut sum_rgb = [0u64; 3];
+        let mut sum_sq = 0u64;
         let mut patch_index = 0usize;
         let base_x = column * context.cell_width;
         let base_y = row * context.cell_height;
@@ -134,16 +135,17 @@ fn convert_row(image: &image::RgbImage, row: u32, width_chars: u32, threshold: u
         for y in 0..context.cell_height {
             for x in 0..context.cell_width {
                 let pixel = *image.get_pixel(base_x + x, base_y + y);
-                total_luminance += luminance(pixel) as f64;
+                total_luminance += luminance(pixel) as u64;
                 sum_rgb[0] += pixel[0] as u64;
                 sum_rgb[1] += pixel[1] as u64;
                 sum_rgb[2] += pixel[2] as u64;
+                sum_sq += pixel[0] as u64 * pixel[0] as u64 + pixel[1] as u64 * pixel[1] as u64 + pixel[2] as u64 * pixel[2] as u64;
                 patch[patch_index] = pixel;
                 patch_index += 1;
             }
         }
 
-        let average_luminance = total_luminance / cell_pixels as f64;
+        let average_luminance = total_luminance as f64 / cell_pixels as f64;
         let emit_foreground = average_luminance >= threshold as f64;
         let emit_background = average_luminance >= background_threshold as f64;
         if !emit_foreground && !emit_background {
@@ -161,12 +163,14 @@ fn convert_row(image: &image::RgbImage, row: u32, width_chars: u32, threshold: u
             continue;
         }
 
+        let sum_pixel = [sum_rgb[0] as f64, sum_rgb[1] as f64, sum_rgb[2] as f64];
+        let sum_pixel_sq = sum_sq as f64;
         let mut best_byte = b' ';
         let mut best_foreground = average_rgb;
         let mut best_background = average_rgb;
         let mut best_error = f64::INFINITY;
         for glyph in &context.glyphs {
-            let (fitted_foreground, fitted_background, error) = fit_colors(&patch, glyph, average_rgb);
+            let (fitted_foreground, fitted_background, error) = fit_colors(&patch, glyph, average_rgb, sum_pixel, sum_pixel_sq);
             if error < best_error {
                 best_byte = glyph.byte;
                 best_foreground = fitted_foreground;
@@ -187,61 +191,51 @@ fn convert_row(image: &image::RgbImage, row: u32, width_chars: u32, threshold: u
     ConvertedRow {ascii, foreground, background}
 }
 
-fn fit_colors(patch: &[Rgb<u8>], glyph: &OptimizedGlyph, average_rgb: [u8; 3]) -> ([u8; 3], [u8; 3], f64) {
+// Mirrors render::fit_colors_for_glyph: the fit error is expanded algebraically from the accumulated sums (s_bp = Σp − s_ap),
+// so no second pass over the patch is needed. The operation order must stay identical to the legacy fitter for output parity.
+fn fit_colors(patch: &[Rgb<u8>], glyph: &OptimizedGlyph, average_rgb: [u8; 3], sum_pixel: [f64; 3], sum_pixel_sq: f64) -> ([u8; 3], [u8; 3], f64) {
     if glyph.degenerate {
-        return (average_rgb, average_rgb, constant_patch_error(patch, average_rgb));
+        return (average_rgb, average_rgb, constant_patch_error(patch.len(), average_rgb, sum_pixel, sum_pixel_sq));
     }
 
     let mut sum_alpha_pixel = [0.0f64; 3];
-    let mut sum_inverse_pixel = [0.0f64; 3];
     for (pixel, &value) in patch.iter().zip(&glyph.alpha) {
-        let alpha = value as f64;
-        let inverse = 1.0 - alpha;
-        for channel in 0..3 {
-            let pixel = pixel[channel] as f64;
-            sum_alpha_pixel[channel] += alpha * pixel;
-            sum_inverse_pixel[channel] += inverse * pixel;
+        if value == 0.0 {
+            continue;
         }
+        let alpha = value as f64;
+        sum_alpha_pixel[0] += alpha * pixel[0] as f64;
+        sum_alpha_pixel[1] += alpha * pixel[1] as f64;
+        sum_alpha_pixel[2] += alpha * pixel[2] as f64;
     }
 
     let mut foreground = [0u8; 3];
     let mut background = [0u8; 3];
+    let mut error = sum_pixel_sq;
     for channel in 0..3 {
-        let foreground_value = (sum_alpha_pixel[channel] * glyph.s_bb - sum_inverse_pixel[channel] * glyph.s_ab) / glyph.determinant;
-        let background_value = (sum_inverse_pixel[channel] * glyph.s_aa - sum_alpha_pixel[channel] * glyph.s_ab) / glyph.determinant;
+        let sum_inverse_pixel = sum_pixel[channel] - sum_alpha_pixel[channel];
+        let foreground_value = ((sum_alpha_pixel[channel] * glyph.s_bb) - (sum_inverse_pixel * glyph.s_ab)) / glyph.determinant;
+        let background_value = ((sum_inverse_pixel * glyph.s_aa) - (sum_alpha_pixel[channel] * glyph.s_ab)) / glyph.determinant;
         foreground[channel] = foreground_value.clamp(0.0, 255.0).round() as u8;
         background[channel] = background_value.clamp(0.0, 255.0).round() as u8;
-    }
-
-    let mut error = 0.0f64;
-    for (pixel, &value) in patch.iter().zip(&glyph.alpha) {
-        let alpha = value as f64;
-        let inverse = 1.0 - alpha;
-        for channel in 0..3 {
-            let predicted = alpha * foreground[channel] as f64 + inverse * background[channel] as f64;
-            let difference = predicted - pixel[channel] as f64;
-            error += difference * difference;
-        }
+        let foreground_f = foreground[channel] as f64;
+        let background_f = background[channel] as f64;
+        error += foreground_f * foreground_f * glyph.s_aa + 2.0 * foreground_f * background_f * glyph.s_ab + background_f * background_f * glyph.s_bb - 2.0 * (foreground_f * sum_alpha_pixel[channel] + background_f * sum_inverse_pixel);
     }
     (foreground, background, error)
 }
 
-fn constant_patch_error(patch: &[Rgb<u8>], color: [u8; 3]) -> f64 {
-    let mut error = 0.0f64;
-    for pixel in patch {
-        for channel in 0..3 {
-            let difference = color[channel] as f64 - pixel[channel] as f64;
-            error += difference * difference;
-        }
+fn constant_patch_error(cell_pixels: usize, color: [u8; 3], sum_pixel: [f64; 3], sum_pixel_sq: f64) -> f64 {
+    let mut error = sum_pixel_sq;
+    for channel in 0..3 {
+        let value = color[channel] as f64;
+        error += cell_pixels as f64 * value * value - 2.0 * value * sum_pixel[channel];
     }
     error
 }
 
 fn luminance(pixel: Rgb<u8>) -> u8 {
-    let red = pixel[0] as f64;
-    let green = pixel[1] as f64;
-    let blue = pixel[2] as f64;
-    (0.2126 * red + 0.7152 * green + 0.0722 * blue) as u8
+    ((2126 * pixel[0] as u32 + 7152 * pixel[1] as u32 + 722 * pixel[2] as u32) / 10000) as u8
 }
 
 #[cfg(test)]

@@ -17,7 +17,7 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
     
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       
@@ -62,7 +62,7 @@ jobs:
       
       - name: Create GitHub Release
         if: steps.check_tag.outputs.exists == 'false'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Release ${{ steps.version.outputs.tag }}
@@ -97,7 +97,7 @@ jobs:
             asset_name: cascii-linux-arm64
     
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -129,7 +129,7 @@ jobs:
           mv ${{ matrix.asset_name }}.tar.gz ${{ github.workspace }}
       
       - name: Upload to Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.create-tag-and-release.outputs.tag }}
           files: ${{ matrix.asset_name }}.tar.gz
@@ -142,7 +142,7 @@ jobs:
     needs: create-tag-and-release
     
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

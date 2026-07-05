@@ -131,15 +131,14 @@ pub(crate) fn image_to_ascii_string(img_path: &Path, font_ratio: f32, threshold:
 
     if target_w != orig_w || target_h != orig_h {
         let dyn_img = DynamicImage::ImageRgb8(img);
-        img = dyn_img.resize_exact(target_w, target_h, image::imageops::FilterType::Lanczos3).to_rgb8();
+        img = dyn_img.resize_exact(target_w, target_h, image::imageops::FilterType::Triangle).to_rgb8();
     }
 
     let (w, h) = img.dimensions();
     let mut out = String::with_capacity((w as usize + 1) * (h as usize));
-    for y in 0..h {
-        for x in 0..w {
-            let px = img.get_pixel(x, y);
-            let l = luminance(*px);
+    for row in img.as_raw().chunks_exact(w as usize * 3) {
+        for px in row.chunks_exact(3) {
+            let l = luminance_rgb(px[0], px[1], px[2]);
             out.push(char_for(l, threshold, ascii_chars));
         }
         out.push('\n');
@@ -165,21 +164,17 @@ pub(crate) fn image_to_ascii_with_colors(img_path: &Path, font_ratio: f32, thres
 
     if target_w != orig_w || target_h != orig_h {
         let dyn_img = DynamicImage::ImageRgb8(img);
-        img = dyn_img.resize_exact(target_w, target_h, image::imageops::FilterType::Lanczos3).to_rgb8();
+        img = dyn_img.resize_exact(target_w, target_h, image::imageops::FilterType::Triangle).to_rgb8();
     }
 
     let (w, h) = img.dimensions();
+    let rgb_data = img.into_raw();
     let mut out = String::with_capacity((w as usize + 1) * (h as usize));
-    let mut rgb_data: Vec<u8> = Vec::with_capacity((w as usize) * (h as usize) * 3);
 
-    for y in 0..h {
-        for x in 0..w {
-            let px = img.get_pixel(x, y);
-            let l = luminance(*px);
+    for row in rgb_data.chunks_exact(w as usize * 3) {
+        for px in row.chunks_exact(3) {
+            let l = luminance_rgb(px[0], px[1], px[2]);
             out.push(char_for(l, threshold, ascii_chars));
-            rgb_data.push(px[0]);
-            rgb_data.push(px[1]);
-            rgb_data.push(px[2]);
         }
         out.push('\n');
     }
@@ -215,25 +210,20 @@ pub enum CframeEraseLayer {
 /// Older readers that don't know about the extension still parse the body correctly and ignore the trailing bytes. New readers detect the extension
 /// by looking past the legacy body for the `flags` byte instead of inferring payload presence from total file length.
 pub(crate) fn write_cframe_binary(width: u32, height: u32, ascii_content: &str, rgb_data: &[u8], bg_rgb_data: Option<&[u8]>, path: &Path) -> Result<()> {
-    use std::io::Write;
-    let mut file = fs::File::create(path).with_context(|| format!("creating cframe file {}", path.display()))?;
-    file.write_all(&width.to_le_bytes())?;
-    file.write_all(&height.to_le_bytes())?;
+    let cell_count = (width * height) as usize;
+    let mut output = Vec::with_capacity(8 + cell_count * 4 + bg_rgb_data.map_or(0, |background| 1 + background.len()));
+    output.extend_from_slice(&width.to_le_bytes());
+    output.extend_from_slice(&height.to_le_bytes());
 
-    let mut char_idx = 0;
-    for ch in ascii_content.chars() {
-        if ch == '\n' {
-            continue;
-        }
+    for (char_idx, byte) in ascii_content.bytes().filter(|byte| *byte != b'\n').enumerate() {
         let rgb_offset = char_idx * 3;
-        file.write_all(&[ch as u8, rgb_data[rgb_offset], rgb_data[rgb_offset + 1], rgb_data[rgb_offset + 2]])?;
-        char_idx += 1;
+        output.extend_from_slice(&[byte, rgb_data[rgb_offset], rgb_data[rgb_offset + 1], rgb_data[rgb_offset + 2]]);
     }
     if let Some(bg_rgb_data) = bg_rgb_data {
-        file.write_all(&[CFRAME_EXT_FLAG_HAS_BG])?;
-        file.write_all(bg_rgb_data)?;
+        output.push(CFRAME_EXT_FLAG_HAS_BG);
+        output.extend_from_slice(bg_rgb_data);
     }
-    Ok(())
+    fs::write(path, output).with_context(|| format!("writing cframe file {}", path.display()))
 }
 
 fn write_cframe_binary_buffered(width: u32, height: u32, ascii_content: &str, rgb_data: &[u8], bg_rgb_data: Option<&[u8]>, path: &Path) -> Result<()> {
@@ -294,16 +284,18 @@ pub(crate) fn read_cframe_to_frame_data(path: &Path) -> Result<AsciiFrameData> {
     let mut rgb_colors = Vec::with_capacity((width * height * 3) as usize);
     let mut bg_rgb_colors = Vec::new();
 
-    for row in 0..height {
-        for col in 0..width {
-            let idx = 8 + ((row * width + col) * 4) as usize;
-            let ch = data[idx] as char;
-            ascii_text.push(ch);
-            rgb_colors.push(data[idx + 1]); // R
-            rgb_colors.push(data[idx + 2]); // G
-            rgb_colors.push(data[idx + 3]); // B
+    if width > 0 {
+        for row in data[8..8 + expected_body].chunks_exact(width as usize * 4) {
+            for cell in row.chunks_exact(4) {
+                ascii_text.push(cell[0] as char);
+                rgb_colors.extend_from_slice(&cell[1..4]);
+            }
+            ascii_text.push('\n');
         }
-        ascii_text.push('\n');
+    } else {
+        for _ in 0..height {
+            ascii_text.push('\n');
+        }
     }
 
     let ext_offset = 8 + expected_body;
@@ -410,11 +402,8 @@ pub(crate) fn read_txt_to_frame_data(path: &Path) -> Result<AsciiFrameData> {
     Ok(AsciiFrameData {ascii_text, width_chars: width, height_chars: height, rgb_colors: Vec::new(), /* empty = renderer uses white */ bg_rgb_colors: Vec::new()})
 }
 
-fn luminance(rgb: image::Rgb<u8>) -> u8 {
-    let r = rgb[0] as f64;
-    let g = rgb[1] as f64;
-    let b = rgb[2] as f64;
-    (0.2126 * r + 0.7152 * g + 0.0722 * b) as u8
+fn luminance_rgb(r: u8, g: u8, b: u8) -> u8 {
+    ((2126 * r as u32 + 7152 * g as u32 + 722 * b as u32) / 10000) as u8
 }
 
 fn char_for(luma: u8, threshold: u8, ascii_chars: &[u8]) -> char {
@@ -444,31 +433,39 @@ fn hash_bytes(bytes: &[u8]) -> u64 {
     hasher.finish()
 }
 
+// Hashes all files in parallel without retaining their bytes; on a hash match the candidate and representative are
+// re-read (page-cache hot from the hashing pass) to confirm byte equality before declaring a duplicate.
 fn dedup_buckets(pngs: &[PathBuf]) -> DedupPlan {
+    let hashes: Vec<Option<u64>> = pngs.par_iter().map(|path| fs::read(path).ok().map(|bytes| hash_bytes(&bytes))).collect();
+
     let mut representatives = Vec::new();
     let mut duplicates = Vec::new();
-    let mut buckets: HashMap<u64, Vec<(usize, Vec<u8>)>> = HashMap::new();
+    let mut buckets: HashMap<u64, Vec<usize>> = HashMap::new();
 
-    for (idx, path) in pngs.iter().enumerate() {
-        let bytes = match fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(_) => {
-                representatives.push(idx);
-                continue;
-            }
+    for (idx, hash) in hashes.into_iter().enumerate() {
+        let Some(hash) = hash else {
+            representatives.push(idx);
+            continue;
         };
-        let hash = hash_bytes(&bytes);
         let bucket = buckets.entry(hash).or_default();
 
-        if let Some((rep_idx, _)) = bucket.iter().find(|(_, rep_bytes)| rep_bytes == &bytes) {
-            duplicates.push((idx, *rep_idx));
+        if let Some(rep_idx) = matching_representative(pngs, bucket, idx) {
+            duplicates.push((idx, rep_idx));
         } else {
             representatives.push(idx);
-            bucket.push((idx, bytes));
+            bucket.push(idx);
         }
     }
 
     DedupPlan { representatives, duplicates }
+}
+
+fn matching_representative(pngs: &[PathBuf], bucket: &[usize], idx: usize) -> Option<usize> {
+    if bucket.is_empty() {
+        return None;
+    }
+    let bytes = fs::read(&pngs[idx]).ok()?;
+    bucket.iter().copied().find(|&rep_idx| fs::read(&pngs[rep_idx]).map(|rep_bytes| rep_bytes == bytes).unwrap_or(false))
 }
 
 fn outputs_for_stem(dst_dir: &Path, stem: &str, output_mode: &OutputMode) -> Vec<PathBuf> {
@@ -536,7 +533,7 @@ fn convert_directory_parallel_with_progress_at_columns<F: Fn(usize, usize) + Sen
         convert_image_to_ascii_with_analysis(img_path, &out_txt, font_ratio, threshold, bg_threshold, columns, ascii_chars, output_mode, cell_color_mode, background_analysis.as_ref())?;
 
         // Update progress
-        let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
+        let current = completed.fetch_add(1, Ordering::Relaxed) + 1;
         if let Some(ref callback) = progress_callback {
             callback(current, total);
         }
@@ -550,7 +547,7 @@ fn convert_directory_parallel_with_progress_at_columns<F: Fn(usize, usize) + Sen
         }
         copy_duplicate_outputs(dst_dir, &pngs, duplicate_idx, representative_idx, output_mode)?;
 
-        let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
+        let current = completed.fetch_add(1, Ordering::Relaxed) + 1;
         if let Some(ref callback) = progress_callback {
             callback(current, total);
         }
@@ -607,13 +604,13 @@ fn convert_directory_parallel_with_detailed_progress_at_columns<F: Fn(Progress) 
         convert_image_to_ascii_with_analysis(img_path, &out_txt, font_ratio, threshold, bg_threshold, columns, ascii_chars, output_mode, cell_color_mode, background_analysis.as_ref())?;
 
         // Update progress - throttle to only report every 1% change
-        let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
+        let current = completed.fetch_add(1, Ordering::Relaxed) + 1;
         let current_percent = current.checked_mul(100).and_then(|value| value.checked_div(total)).unwrap_or(0);
-        let last_percent = last_reported_percent.load(Ordering::SeqCst);
+        let last_percent = last_reported_percent.load(Ordering::Relaxed);
 
         // Only report if percentage changed (throttle to ~100 updates max)
         if current_percent > last_percent || current == total {
-            last_reported_percent.store(current_percent, Ordering::SeqCst);
+            last_reported_percent.store(current_percent, Ordering::Relaxed);
             progress_callback(Progress::converting_frames(current, total));
         }
 
@@ -626,12 +623,12 @@ fn convert_directory_parallel_with_detailed_progress_at_columns<F: Fn(Progress) 
         }
         copy_duplicate_outputs(dst_dir, &pngs, duplicate_idx, representative_idx, output_mode)?;
 
-        let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
+        let current = completed.fetch_add(1, Ordering::Relaxed) + 1;
         let current_percent = current.checked_mul(100).and_then(|value| value.checked_div(total)).unwrap_or(0);
-        let last_percent = last_reported_percent.load(Ordering::SeqCst);
+        let last_percent = last_reported_percent.load(Ordering::Relaxed);
 
         if current_percent > last_percent || current == total {
-            last_reported_percent.store(current_percent, Ordering::SeqCst);
+            last_reported_percent.store(current_percent, Ordering::Relaxed);
             progress_callback(Progress::converting_frames(current, total));
         }
 
