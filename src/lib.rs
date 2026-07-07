@@ -997,8 +997,10 @@ impl AsciiConverter {
 
         thread::scope(|scope| -> Result<()> {
             let (sender, receiver) = sync_channel::<Result<Vec<convert::AsciiFrameData>>>(2);
+            // The first frame was already converted for the resolution probe; feed it as the first batch instead of decoding it again.
+            let _ = sender.send(Ok(vec![first_frame]));
             let worker = scope.spawn(move || {
-                for batch_start in (0..total_frames).step_by(batch_size) {
+                for batch_start in (1..total_frames).step_by(batch_size) {
                     let batch_end = (batch_start + batch_size).min(total_frames);
                     let batch = &png_paths[batch_start..batch_end];
                     let frame_data: Result<Vec<convert::AsciiFrameData>> = batch.par_iter().map(|path| convert::image_to_ascii_frame_data_with_analysis(path, conv_opts.font_ratio, conv_opts.luminance, bg_threshold, conv_opts.columns, ascii_chars, conv_opts.cell_color_mode, background_analysis.as_ref())).collect();
@@ -1008,6 +1010,7 @@ impl AsciiConverter {
                 }
             });
 
+            let mut rgb_buf = Vec::new();
             for frame_data in receiver {
                 let frame_data = frame_data?;
 
@@ -1021,7 +1024,7 @@ impl AsciiConverter {
                         }
                         return Err(Cancelled.into());
                     }
-                    let rgb_buf = render::render_ascii_frame_to_rgb(frame, &atlas, use_colors);
+                    render::render_ascii_frame_into_rgb(frame, &atlas, use_colors, &mut rgb_buf);
                     if let Err(e) = stdin.as_mut().unwrap().write_all(&rgb_buf) {
                         drop(stdin.take());
                         let output = child.take().unwrap().wait_with_output().context("waiting for ffmpeg")?;
@@ -1029,7 +1032,7 @@ impl AsciiConverter {
                         return Err(anyhow!("ffmpeg encoding failed: {} (stderr: {})", e, stderr));
                     }
 
-                    let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                    let current = completed.fetch_add(1, Ordering::Relaxed) + 1;
                     let current_percent = current.checked_mul(100).and_then(|value| value.checked_div(total_frames)).unwrap_or(0);
                     let last_percent = if current > 1 {((current - 1) * 100) / total_frames} else {0};
 
@@ -1129,6 +1132,7 @@ impl AsciiConverter {
         let render_with_colors = to_video_opts.use_colors.unwrap_or(use_cframes);
         progress_callback(Progress::rendering_video(0, total_frames));
 
+        let mut rgb_buf = Vec::new();
         for batch_start in (0..total_frames).step_by(batch_size) {
             let batch_end = (batch_start + batch_size).min(total_frames);
             let batch = &frame_paths[batch_start..batch_end];
@@ -1138,7 +1142,7 @@ impl AsciiConverter {
 
             // Render and pipe sequentially
             for frame in &frame_data {
-                let rgb_buf = render::render_ascii_frame_to_rgb(frame, &atlas, render_with_colors);
+                render::render_ascii_frame_into_rgb(frame, &atlas, render_with_colors, &mut rgb_buf);
                 if let Err(e) = stdin.write_all(&rgb_buf) {
                     drop(stdin);
                     let output = child.wait_with_output().context("waiting for ffmpeg")?;
@@ -1146,7 +1150,7 @@ impl AsciiConverter {
                     return Err(anyhow!("ffmpeg encoding failed: {} (stderr: {})", e, stderr));
                 }
 
-                let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                let current = completed.fetch_add(1, Ordering::Relaxed) + 1;
                 let current_percent = current.checked_mul(100).and_then(|value| value.checked_div(total_frames)).unwrap_or(0);
                 let last_percent = if current > 1 {((current - 1) * 100) / total_frames} else {0};
 

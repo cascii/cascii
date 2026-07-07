@@ -34,7 +34,7 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
@@ -127,7 +127,7 @@ jobs:
             asset_name: cascii-linux-arm64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
 
@@ -175,7 +175,7 @@ jobs:
     if: ${{ inputs.publish_crate }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
 

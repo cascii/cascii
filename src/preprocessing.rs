@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use rayon::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcCommand;
@@ -241,11 +242,11 @@ pub fn preprocess_directory(source_dir: &Path, filter: &str, output_dir: &Path, 
         return Err(anyhow!("No image files found in {}", source_dir.display()));
     }
 
-    for img_path in &images {
+    images.par_iter().try_for_each(|img_path| {
         let stem = img_path.file_stem().and_then(|s| s.to_str()).unwrap_or("frame");
         let out_path = output_dir.join(format!("{}.png", stem));
-        preprocess_image_to_file(img_path, filter, &out_path, ffmpeg_config)?;
-    }
+        preprocess_image_to_file(img_path, filter, &out_path, ffmpeg_config)
+    })?;
 
     Ok(images.len())
 }

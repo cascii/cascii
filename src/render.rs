@@ -18,6 +18,8 @@ static ANALYSIS_GLYPH_ATLAS: OnceLock<std::result::Result<GlyphAtlas, String>> =
 struct GlyphBitmap {
     /// Alpha coverage values, row-major, cell_width * cell_height entries
     alpha: Vec<f32>,
+    /// Same coverage quantized to 0..=255 for integer blending in the renderer
+    alpha_u8: Vec<u8>,
     s_aa: f64,
     s_ab: f64,
     s_bb: f64,
@@ -95,8 +97,9 @@ pub(crate) fn build_glyph_atlas_with_stroke(font_size: f32, text_stroke_width: f
         let mean_alpha = sum_alpha / alpha.len().max(1) as f64;
         let det = s_aa * s_bb - s_ab * s_ab;
         let degenerate = mean_alpha <= 1e-6 || mean_alpha >= 1.0 - 1e-6 || det.abs() <= 1e-9;
+        let alpha_u8 = alpha.iter().map(|value| (value * 255.0).round().clamp(0.0, 255.0) as u8).collect();
 
-        glyphs.insert(byte, GlyphBitmap {alpha, s_aa, s_ab, s_bb, det, degenerate});
+        glyphs.insert(byte, GlyphBitmap {alpha, alpha_u8, s_aa, s_ab, s_bb, det, degenerate});
     }
 
     Ok(GlyphAtlas {glyphs, cell_width, cell_height})
@@ -169,7 +172,7 @@ pub(crate) fn background_analysis_context(ascii_chars: &[u8]) -> Result<Backgrou
     Ok(BackgroundAnalysisContext {atlas: analysis_glyph_atlas()?, candidate_bytes: candidate_bytes_for_ascii_chars(ascii_chars)})
 }
 
-pub(crate) fn render_ascii_frame_to_rgb(frame: &AsciiFrameData, atlas: &GlyphAtlas, use_colors: bool) -> Vec<u8> {
+pub(crate) fn render_ascii_frame_into_rgb(frame: &AsciiFrameData, atlas: &GlyphAtlas, use_colors: bool, buffer: &mut Vec<u8>) {
     let mut pixel_w = frame.width_chars * atlas.cell_width;
     let mut pixel_h = frame.height_chars * atlas.cell_height;
 
@@ -181,20 +184,19 @@ pub(crate) fn render_ascii_frame_to_rgb(frame: &AsciiFrameData, atlas: &GlyphAtl
         pixel_h += 1;
     }
 
-    let mut buffer = vec![0u8; (pixel_w * pixel_h * 3) as usize];
+    buffer.clear();
+    buffer.resize((pixel_w * pixel_h * 3) as usize, 0);
 
     let mut char_idx: usize = 0;
     let mut row: u32 = 0;
     let mut col: u32 = 0;
 
-    for ch in frame.ascii_text.chars() {
-        if ch == '\n' {
+    for &byte in frame.ascii_text.as_bytes() {
+        if byte == b'\n' {
             row += 1;
             col = 0;
             continue;
         }
-
-        let byte = ch as u8;
 
         // Get color for this character
         let (r, g, b) = if use_colors && char_idx * 3 + 2 < frame.rgb_colors.len() {
@@ -205,41 +207,39 @@ pub(crate) fn render_ascii_frame_to_rgb(frame: &AsciiFrameData, atlas: &GlyphAtl
 
         let base_x = col * atlas.cell_width;
         let base_y = row * atlas.cell_height;
+        let x_end = (base_x + atlas.cell_width).min(pixel_w);
+        let y_end = (base_y + atlas.cell_height).min(pixel_h);
+        let cell_cols = (x_end - base_x) as usize;
 
         if char_idx * 3 + 2 < frame.bg_rgb_colors.len() {
-            let bg_r = frame.bg_rgb_colors[char_idx * 3];
-            let bg_g = frame.bg_rgb_colors[char_idx * 3 + 1];
-            let bg_b = frame.bg_rgb_colors[char_idx * 3 + 2];
-            for gy in 0..atlas.cell_height {
-                for gx in 0..atlas.cell_width {
-                    let px = base_x + gx;
-                    let py = base_y + gy;
-                    if px >= pixel_w || py >= pixel_h {
-                        continue;
-                    }
-                    let offset = ((py * pixel_w + px) * 3) as usize;
-                    buffer[offset] = bg_r;
-                    buffer[offset + 1] = bg_g;
-                    buffer[offset + 2] = bg_b;
+            let bg = [frame.bg_rgb_colors[char_idx * 3], frame.bg_rgb_colors[char_idx * 3 + 1], frame.bg_rgb_colors[char_idx * 3 + 2]];
+            for py in base_y..y_end {
+                let offset = ((py * pixel_w + base_x) * 3) as usize;
+                for pixel in buffer[offset..offset + cell_cols * 3].chunks_exact_mut(3) {
+                    pixel.copy_from_slice(&bg);
                 }
             }
         }
 
         // Look up glyph bitmap
         if let Some(glyph_bitmap) = atlas.glyphs.get(&byte) {
-            for gy in 0..atlas.cell_height {
-                for gx in 0..atlas.cell_width {
-                    let px = base_x + gx;
-                    let py = base_y + gy;
-                    if px >= pixel_w || py >= pixel_h {
+            for py in base_y..y_end {
+                let alpha_row = ((py - base_y) * atlas.cell_width) as usize;
+                let offset = ((py * pixel_w + base_x) * 3) as usize;
+                for gx in 0..cell_cols {
+                    let alpha = glyph_bitmap.alpha_u8[alpha_row + gx] as u32;
+                    if alpha == 0 {
                         continue;
                     }
-                    let alpha = glyph_bitmap.alpha[(gy * atlas.cell_width + gx) as usize];
-                    if alpha > 0.0 {
-                        let offset = ((py * pixel_w + px) * 3) as usize;
-                        buffer[offset] = blend_channel(buffer[offset], r, alpha);
-                        buffer[offset + 1] = blend_channel(buffer[offset + 1], g, alpha);
-                        buffer[offset + 2] = blend_channel(buffer[offset + 2], b, alpha);
+                    let pixel = offset + gx * 3;
+                    if alpha == 255 {
+                        buffer[pixel] = r;
+                        buffer[pixel + 1] = g;
+                        buffer[pixel + 2] = b;
+                    } else {
+                        buffer[pixel] = blend_channel(buffer[pixel], r, alpha);
+                        buffer[pixel + 1] = blend_channel(buffer[pixel + 1], g, alpha);
+                        buffer[pixel + 2] = blend_channel(buffer[pixel + 2], b, alpha);
                     }
                 }
             }
@@ -248,8 +248,6 @@ pub(crate) fn render_ascii_frame_to_rgb(frame: &AsciiFrameData, atlas: &GlyphAtl
         char_idx += 1;
         col += 1;
     }
-
-    buffer
 }
 
 pub(crate) fn fit_image_to_ascii_with_cell_backgrounds(img_path: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, ascii_chars: &[u8]) -> Result<AsciiFrameData> {
@@ -274,7 +272,7 @@ pub(crate) fn fit_image_to_ascii_with_cell_backgrounds_with_context(img_path: &P
     let target_h = height_chars * atlas.cell_height;
     if target_w != orig_w || target_h != orig_h {
         let dyn_img = DynamicImage::ImageRgb8(img);
-        img = dyn_img.resize_exact(target_w, target_h, image::imageops::FilterType::Lanczos3).to_rgb8();
+        img = dyn_img.resize_exact(target_w, target_h, image::imageops::FilterType::Triangle).to_rgb8();
     }
 
     let cell_pixels = (atlas.cell_width * atlas.cell_height) as usize;
@@ -288,22 +286,24 @@ pub(crate) fn fit_image_to_ascii_with_cell_backgrounds_with_context(img_path: &P
             let base_x = col * atlas.cell_width;
             let base_y = row * atlas.cell_height;
             let mut patch_index = 0usize;
-            let mut total_luma = 0.0f64;
+            let mut total_luma = 0u64;
             let mut sum_rgb = [0u64; 3];
+            let mut sum_sq = 0u64;
 
             for py in 0..atlas.cell_height {
                 for px in 0..atlas.cell_width {
                     let pixel = *img.get_pixel(base_x + px, base_y + py);
-                    total_luma += luminance(pixel) as f64;
+                    total_luma += luminance(pixel) as u64;
                     sum_rgb[0] += pixel[0] as u64;
                     sum_rgb[1] += pixel[1] as u64;
                     sum_rgb[2] += pixel[2] as u64;
+                    sum_sq += pixel[0] as u64 * pixel[0] as u64 + pixel[1] as u64 * pixel[1] as u64 + pixel[2] as u64 * pixel[2] as u64;
                     patch[patch_index] = pixel;
                     patch_index += 1;
                 }
             }
 
-            let avg_luma = total_luma / cell_pixels as f64;
+            let avg_luma = total_luma as f64 / cell_pixels as f64;
             let emit_fg = avg_luma >= threshold as f64;
             let emit_bg = avg_luma >= bg_threshold as f64;
 
@@ -330,6 +330,8 @@ pub(crate) fn fit_image_to_ascii_with_cell_backgrounds_with_context(img_path: &P
                 continue;
             }
 
+            let sum_p = [sum_rgb[0] as f64, sum_rgb[1] as f64, sum_rgb[2] as f64];
+            let sum_p_sq = sum_sq as f64;
             let mut best_byte = b' ';
             let mut best_fg = avg_rgb;
             let mut best_bg = avg_rgb;
@@ -337,7 +339,7 @@ pub(crate) fn fit_image_to_ascii_with_cell_backgrounds_with_context(img_path: &P
 
             for &byte in &background_analysis.candidate_bytes {
                 if let Some(glyph) = atlas.glyphs.get(&byte) {
-                    let (fg, bg, error) = fit_colors_for_glyph(&patch, glyph, avg_rgb);
+                    let (fg, bg, error) = fit_colors_for_glyph(&patch, glyph, avg_rgb, sum_p, sum_p_sq);
                     if error < best_error {
                         best_byte = byte;
                         best_fg = fg;
@@ -362,63 +364,55 @@ pub(crate) fn fit_image_to_ascii_with_cell_backgrounds_with_context(img_path: &P
     Ok(AsciiFrameData {ascii_text, width_chars, height_chars, rgb_colors, bg_rgb_colors})
 }
 
-fn blend_channel(background: u8, foreground: u8, alpha: f32) -> u8 {
-    ((background as f32 * (1.0 - alpha)) + (foreground as f32 * alpha)).round().clamp(0.0, 255.0) as u8
+fn blend_channel(background: u8, foreground: u8, alpha: u32) -> u8 {
+    ((background as u32 * (255 - alpha) + foreground as u32 * alpha + 127) / 255) as u8
 }
 
-fn fit_colors_for_glyph(patch: &[Rgb<u8>], glyph: &GlyphBitmap, avg_rgb: [u8; 3]) -> ([u8; 3], [u8; 3], f64) {
+// The fit error Σ(pred − p)² is expanded algebraically from the accumulated sums (pred = a·fg + b·bg, b = 1 − a, s_bp = Σp − s_ap),
+// so no second pass over the patch is needed: error = Σp² − 2(fg·s_ap + bg·s_bp) + fg²·s_aa + 2·fg·bg·s_ab + bg²·s_bb per channel.
+fn fit_colors_for_glyph(patch: &[Rgb<u8>], glyph: &GlyphBitmap, avg_rgb: [u8; 3], sum_p: [f64; 3], sum_p_sq: f64) -> ([u8; 3], [u8; 3], f64) {
     if glyph.degenerate {
-        return (avg_rgb, avg_rgb, constant_patch_error(patch, avg_rgb));
+        return (avg_rgb, avg_rgb, constant_patch_error(patch.len(), avg_rgb, sum_p, sum_p_sq));
+    }
+
+    let mut s_ap = [0.0f64; 3];
+    for (pixel, &value) in patch.iter().zip(glyph.alpha.iter()) {
+        if value == 0.0 {
+            continue;
+        }
+        let a = value as f64;
+        s_ap[0] += a * pixel[0] as f64;
+        s_ap[1] += a * pixel[1] as f64;
+        s_ap[2] += a * pixel[2] as f64;
     }
 
     let mut fg = [0u8; 3];
     let mut bg = [0u8; 3];
+    let mut error = sum_p_sq;
     for channel in 0..3 {
-        let mut s_ap = 0.0f64;
-        let mut s_bp = 0.0f64;
-        for (pixel, &value) in patch.iter().zip(glyph.alpha.iter()) {
-            let a = value as f64;
-            let b = 1.0 - a;
-            let p = pixel[channel] as f64;
-            s_ap += a * p;
-            s_bp += b * p;
-        }
-
-        let fg_value = ((s_ap * glyph.s_bb) - (s_bp * glyph.s_ab)) / glyph.det;
-        let bg_value = ((s_bp * glyph.s_aa) - (s_ap * glyph.s_ab)) / glyph.det;
+        let s_bp = sum_p[channel] - s_ap[channel];
+        let fg_value = ((s_ap[channel] * glyph.s_bb) - (s_bp * glyph.s_ab)) / glyph.det;
+        let bg_value = ((s_bp * glyph.s_aa) - (s_ap[channel] * glyph.s_ab)) / glyph.det;
         fg[channel] = fg_value.clamp(0.0, 255.0).round() as u8;
         bg[channel] = bg_value.clamp(0.0, 255.0).round() as u8;
-    }
-
-    let mut error = 0.0f64;
-    for (pixel, &value) in patch.iter().zip(glyph.alpha.iter()) {
-        let a = value as f64;
-        let b = 1.0 - a;
-        for channel in 0..3 {
-            let predicted = a * fg[channel] as f64 + b * bg[channel] as f64;
-            let diff = predicted - pixel[channel] as f64;
-            error += diff * diff;
-        }
+        let fg_f = fg[channel] as f64;
+        let bg_f = bg[channel] as f64;
+        error += fg_f * fg_f * glyph.s_aa + 2.0 * fg_f * bg_f * glyph.s_ab + bg_f * bg_f * glyph.s_bb - 2.0 * (fg_f * s_ap[channel] + bg_f * s_bp);
     }
     (fg, bg, error)
 }
 
-fn constant_patch_error(patch: &[Rgb<u8>], color: [u8; 3]) -> f64 {
-    let mut error = 0.0f64;
-    for pixel in patch {
-        for channel in 0..3 {
-            let diff = color[channel] as f64 - pixel[channel] as f64;
-            error += diff * diff;
-        }
+fn constant_patch_error(cell_pixels: usize, color: [u8; 3], sum_p: [f64; 3], sum_p_sq: f64) -> f64 {
+    let mut error = sum_p_sq;
+    for channel in 0..3 {
+        let c = color[channel] as f64;
+        error += cell_pixels as f64 * c * c - 2.0 * c * sum_p[channel];
     }
     error
 }
 
 fn luminance(rgb: Rgb<u8>) -> u8 {
-    let r = rgb[0] as f64;
-    let g = rgb[1] as f64;
-    let b = rgb[2] as f64;
-    (0.2126 * r + 0.7152 * g + 0.0722 * b) as u8
+    ((2126 * rgb[0] as u32 + 7152 * rgb[1] as u32 + 722 * rgb[2] as u32) / 10000) as u8
 }
 
 pub(crate) fn spawn_ffmpeg_encoder(pixel_width: u32, pixel_height: u32, fps: u32, crf: u8, audio_path: Option<&Path>, output_path: &Path, ffmpeg_config: &FfmpegConfig) -> Result<std::process::Child> {
@@ -460,7 +454,8 @@ mod tests {
     fn renders_background_for_space_cells() -> Result<()> {
         let atlas = build_glyph_atlas(12.0)?;
         let frame = AsciiFrameData {ascii_text: " \n".to_string(), width_chars: 1, height_chars: 1, rgb_colors: Vec::new(), bg_rgb_colors: vec![255, 0, 0]};
-        let buffer = render_ascii_frame_to_rgb(&frame, &atlas, false);
+        let mut buffer = Vec::new();
+        render_ascii_frame_into_rgb(&frame, &atlas, false, &mut buffer);
         assert!(buffer.chunks_exact(3).any(|pixel| pixel[0] > 200 && pixel[1] < 16 && pixel[2] < 16));
         Ok(())
     }
@@ -469,7 +464,8 @@ mod tests {
     fn blends_foreground_glyph_over_background() -> Result<()> {
         let atlas = build_glyph_atlas(12.0)?;
         let frame = AsciiFrameData {ascii_text: "M\n".to_string(), width_chars: 1, height_chars: 1, rgb_colors: vec![0, 255, 0], bg_rgb_colors: vec![0, 0, 255]};
-        let buffer = render_ascii_frame_to_rgb(&frame, &atlas, true);
+        let mut buffer = Vec::new();
+        render_ascii_frame_into_rgb(&frame, &atlas, true, &mut buffer);
         assert!(buffer.chunks_exact(3).any(|pixel| pixel[1] == 0 && pixel[2] > 200));
         assert!(buffer.chunks_exact(3).any(|pixel| pixel[1] > 0 && pixel[2] < 255));
         Ok(())

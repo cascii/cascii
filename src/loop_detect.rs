@@ -1,6 +1,7 @@
 use crate::convert::read_cframe_to_frame_data;
 use anyhow::{anyhow, Context, Result};
 use dialoguer::Select;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, HashMap};
@@ -84,14 +85,13 @@ struct FrameComparisonCache<'a> {
     frames: &'a [LoadedFrame],
     mode: LoopMatchMode,
     ramp: &'a RampLookup,
-    quick: Vec<Option<FrameMetrics>>,
-    full: Vec<Option<FrameMetrics>>,
+    quick: HashMap<usize, FrameMetrics>,
+    full: HashMap<usize, FrameMetrics>,
 }
 
 impl<'a> FrameComparisonCache<'a> {
     fn new(frames: &'a [LoadedFrame], mode: LoopMatchMode, ramp: &'a RampLookup) -> Self {
-        let pair_count = frames.len().saturating_mul(frames.len().saturating_sub(1)) / 2;
-        Self {frames, mode, ramp, quick: vec![None; pair_count], full: vec![None; pair_count]}
+        Self {frames, mode, ramp, quick: HashMap::new(), full: HashMap::new()}
     }
 
     fn compare(&mut self, left: usize, right: usize, quick: bool) -> FrameMetrics {
@@ -99,12 +99,12 @@ impl<'a> FrameComparisonCache<'a> {
         let frame_count = self.frames.len();
         let index = left * frame_count - left * (left + 1) / 2 + right - left - 1;
         let metrics = if quick {&mut self.quick} else {&mut self.full};
-        if let Some(metrics) = metrics[index] {
-            return metrics;
+        if let Some(metrics) = metrics.get(&index) {
+            return *metrics;
         }
 
         let computed = compare_frames(&self.frames[left], &self.frames[right], self.mode, self.ramp, quick);
-        metrics[index] = Some(computed);
+        metrics.insert(index, computed);
         computed
     }
 }
@@ -156,11 +156,13 @@ pub fn detect_frame_loops(directory: &Path, options: &LoopDetectionOptions) -> R
     }
 
     let ramp = RampLookup::new(&options.ascii_ramp)?;
-    let mut comparison_cache = FrameComparisonCache::new(&frames, options.mode, &ramp);
-    let mut candidates = Vec::new();
     let maximum_period = frames.len() - window;
 
-    for period in options.minimum_distance..=maximum_period {
+    // Periods are scanned independently in parallel; pairs compared at one period recur only at periods dividing it,
+    // so the per-period comparison caches lose little reuse.
+    let candidates_per_period: Vec<Vec<LoopCandidate>> = (options.minimum_distance..maximum_period + 1).into_par_iter().map(|period| {
+        let mut comparison_cache = FrameComparisonCache::new(&frames, options.mode, &ramp);
+        let mut candidates = Vec::new();
         let maximum_start = frames.len() - period - window;
         let mut matching_run = Vec::new();
 
@@ -178,8 +180,10 @@ pub fn detect_frame_loops(directory: &Path, options: &LoopDetectionOptions) -> R
         if !matching_run.is_empty() {
             push_best_candidate(&mut candidates, &frames, period, window, options, &mut comparison_cache, &matching_run);
         }
-    }
+        candidates
+    }).collect();
 
+    let candidates = candidates_per_period.into_iter().flatten().collect();
     Ok(remove_redundant_candidates(candidates, &frames, options.mode))
 }
 
