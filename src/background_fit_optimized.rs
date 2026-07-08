@@ -5,9 +5,9 @@ use rayon::prelude::*;
 use std::path::Path;
 
 use crate::convert::AsciiFrameData;
+use crate::BgFitQuality;
 
 const FONT_DATA: &[u8] = include_bytes!("../resources/DejaVuSansMono.ttf");
-const ANALYSIS_FONT_SIZE: f32 = 16.0;
 
 #[derive(Debug)]
 struct OptimizedGlyph {
@@ -33,9 +33,9 @@ struct ConvertedRow {
     background: Vec<u8>,
 }
 
-pub(crate) fn background_analysis_context(ascii_chars: &[u8]) -> Result<OptimizedBackgroundAnalysisContext> {
+pub(crate) fn background_analysis_context(ascii_chars: &[u8], quality: BgFitQuality) -> Result<OptimizedBackgroundAnalysisContext> {
     let font = FontRef::try_from_slice(FONT_DATA).map_err(|error| anyhow!("failed to load embedded font: {error}"))?;
-    let scale = PxScale::from(ANALYSIS_FONT_SIZE);
+    let scale = PxScale::from(quality.analysis_font_size());
     let scaled_font = font.as_scaled(scale);
     let cell_width = scaled_font.h_advance(font.glyph_id('M')).ceil() as u32;
     let cell_height = (scaled_font.ascent() - scaled_font.descent()).ceil() as u32;
@@ -77,8 +77,8 @@ pub(crate) fn background_analysis_context(ascii_chars: &[u8]) -> Result<Optimize
     Ok(OptimizedBackgroundAnalysisContext {glyphs, cell_width, cell_height})
 }
 
-pub(crate) fn fit_image_to_ascii_with_cell_backgrounds(image_path: &Path, font_ratio: f32, threshold: u8, background_threshold: u8, columns: Option<u32>, ascii_chars: &[u8]) -> Result<AsciiFrameData> {
-    let context = background_analysis_context(ascii_chars)?;
+pub(crate) fn fit_image_to_ascii_with_cell_backgrounds(image_path: &Path, font_ratio: f32, threshold: u8, background_threshold: u8, columns: Option<u32>, ascii_chars: &[u8], quality: BgFitQuality) -> Result<AsciiFrameData> {
+    let context = background_analysis_context(ascii_chars, quality)?;
     fit_image_to_ascii_with_cell_backgrounds_with_context(image_path, font_ratio, threshold, background_threshold, columns, &context)
 }
 
@@ -244,13 +244,12 @@ mod tests {
 
     #[test]
     fn optimized_context_preserves_candidate_order() {
-        let context = background_analysis_context(b" A#A").unwrap();
+        let context = background_analysis_context(b" A#A", BgFitQuality::Fidelity).unwrap();
         let bytes: Vec<u8> = context.glyphs.iter().map(|glyph| glyph.byte).collect();
         assert_eq!(bytes, vec![b'A', b'#', b'A']);
     }
 
-    #[test]
-    fn optimized_output_matches_legacy_output() {
+    fn assert_optimized_matches_legacy(quality: BgFitQuality) {
         let width = 37;
         let height = 29;
         let image = image::RgbImage::from_fn(width, height, |x, y| Rgb([((x * 17 + y * 3) % 256) as u8, ((x * 5 + y * 23) % 256) as u8, ((x * 11 + y * 7) % 256) as u8]));
@@ -258,11 +257,21 @@ mod tests {
         image.save_with_format(input.path(), image::ImageFormat::Png).unwrap();
         let ascii_chars = b" .:-=+*#%@";
 
-        let legacy = crate::render::fit_image_to_ascii_with_cell_backgrounds(input.path(), 0.7, 20, 20, Some(24), ascii_chars).unwrap();
-        let optimized = fit_image_to_ascii_with_cell_backgrounds(input.path(), 0.7, 20, 20, Some(24), ascii_chars).unwrap();
+        let legacy = crate::render::fit_image_to_ascii_with_cell_backgrounds(input.path(), 0.7, 20, 20, Some(24), ascii_chars, quality).unwrap();
+        let optimized = fit_image_to_ascii_with_cell_backgrounds(input.path(), 0.7, 20, 20, Some(24), ascii_chars, quality).unwrap();
 
         assert_eq!(optimized.ascii_text, legacy.ascii_text);
         assert_eq!(optimized.rgb_colors, legacy.rgb_colors);
         assert_eq!(optimized.bg_rgb_colors, legacy.bg_rgb_colors);
+    }
+
+    #[test]
+    fn optimized_output_matches_legacy_output() {
+        assert_optimized_matches_legacy(BgFitQuality::Fidelity);
+    }
+
+    #[test]
+    fn optimized_output_matches_legacy_output_fast() {
+        assert_optimized_matches_legacy(BgFitQuality::Fast);
     }
 }

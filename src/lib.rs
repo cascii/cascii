@@ -269,6 +269,9 @@ pub struct ConversionResult {
     /// Background fitting implementation: "off", "legacy", or "optimized"
     #[serde(default = "default_cell_background_mode")]
     pub cell_background_mode: String,
+    /// Background fitting analysis resolution: "fidelity" or "fast"
+    #[serde(default = "default_bg_fit_quality")]
+    pub bg_fit_quality: String,
     /// Resolved background luminance threshold actually used by the bg-fit pass. Equal to `luminance` unless an explicit override was set via `ConversionOptions::with_bg_luminance`.
     pub bg_luminance: u8,
     /// Character ramp used for glyph selection, from darkest to lightest.
@@ -277,6 +280,10 @@ pub struct ConversionResult {
 
 fn default_cell_background_mode() -> String {
     "off".to_string()
+}
+
+fn default_bg_fit_quality() -> String {
+    "fidelity".to_string()
 }
 
 /// Serializable details written to `details.toml`
@@ -295,13 +302,14 @@ struct Details {
     color: String,
     fit_cell_backgrounds: bool,
     cell_background_mode: String,
+    bg_fit_quality: String,
     bg_luminance: u8,
     ascii_chars: String,
 }
 
 impl ConversionResult {
     fn to_details(&self) -> Details {
-        Details {version: env!("CARGO_PKG_VERSION").to_string(), frames: self.frame_count, luminance: self.luminance, font_ratio: self.font_ratio, columns: self.columns, fps: self.fps, output: self.output_mode.clone(), audio: self.audio_extracted, background_color: self.background_color.clone(), color: self.color.clone(), fit_cell_backgrounds: self.fit_cell_backgrounds, cell_background_mode: self.cell_background_mode.clone(), bg_luminance: self.bg_luminance, ascii_chars: self.ascii_chars.clone()}
+        Details {version: env!("CARGO_PKG_VERSION").to_string(), frames: self.frame_count, luminance: self.luminance, font_ratio: self.font_ratio, columns: self.columns, fps: self.fps, output: self.output_mode.clone(), audio: self.audio_extracted, background_color: self.background_color.clone(), color: self.color.clone(), fit_cell_backgrounds: self.fit_cell_backgrounds, cell_background_mode: self.cell_background_mode.clone(), bg_fit_quality: self.bg_fit_quality.clone(), bg_luminance: self.bg_luminance, ascii_chars: self.ascii_chars.clone()}
     }
 
     /// Write the conversion details to a details.toml file in the output directory
@@ -405,6 +413,34 @@ impl CellColorMode {
     }
 }
 
+/// Controls the analysis resolution of the cell-background fitting passes.
+///
+/// [`Fidelity`](Self::Fidelity) (the default) fits glyphs against full-resolution cell patches. [`Fast`](Self::Fast) rasterizes the
+/// analysis atlas at a smaller size, shrinking both the pre-fit image resize and the per-glyph solver work several-fold at the cost
+/// of slightly coarser glyph and color choices. Has no effect on [`CellColorMode::ForegroundOnly`] conversions.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BgFitQuality {
+    #[default]
+    Fidelity,
+    Fast,
+}
+
+impl BgFitQuality {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fidelity => "fidelity",
+            Self::Fast => "fast",
+        }
+    }
+
+    pub(crate) fn analysis_font_size(self) -> f32 {
+        match self {
+            Self::Fidelity => 16.0,
+            Self::Fast => 7.0,
+        }
+    }
+}
+
 /// Options for ASCII conversion
 #[derive(Debug, Clone)]
 pub struct ConversionOptions {
@@ -428,11 +464,13 @@ pub struct ConversionOptions {
     pub output_mode: OutputMode,
     /// How per-cell colors should be modeled during conversion
     pub cell_color_mode: CellColorMode,
+    /// Analysis resolution for the cell-background fitting passes
+    pub bg_fit_quality: BgFitQuality,
 }
 
 impl Default for ConversionOptions {
     fn default() -> Self {
-        Self {columns: Some(400), font_ratio: 0.7, luminance: 20, bg_luminance: None, ascii_chars: default_ascii_chars(), output_mode: OutputMode::TextOnly, cell_color_mode: CellColorMode::ForegroundOnly}
+        Self {columns: Some(400), font_ratio: 0.7, luminance: 20, bg_luminance: None, ascii_chars: default_ascii_chars(), output_mode: OutputMode::TextOnly, cell_color_mode: CellColorMode::ForegroundOnly, bg_fit_quality: BgFitQuality::Fidelity}
     }
 }
 
@@ -497,9 +535,15 @@ impl ConversionOptions {
         self
     }
 
+    /// Set the analysis resolution for the cell-background fitting passes
+    pub fn with_bg_fit_quality(mut self, quality: BgFitQuality) -> Self {
+        self.bg_fit_quality = quality;
+        self
+    }
+
     /// Create options from a preset
     pub fn from_preset(preset: &Preset, ascii_chars: String) -> Self {
-        Self {columns: Some(preset.columns), font_ratio: preset.font_ratio, luminance: preset.luminance, bg_luminance: None, ascii_chars, output_mode: OutputMode::TextOnly, cell_color_mode: CellColorMode::ForegroundOnly}
+        Self {columns: Some(preset.columns), font_ratio: preset.font_ratio, luminance: preset.luminance, bg_luminance: None, ascii_chars, output_mode: OutputMode::TextOnly, cell_color_mode: CellColorMode::ForegroundOnly, bg_fit_quality: BgFitQuality::Fidelity}
     }
 }
 
@@ -653,7 +697,7 @@ impl AsciiConverter {
     /// ```
     pub fn convert_image(&self, input: &Path, output: &Path, options: &ConversionOptions) -> Result<()> {
         let ascii_chars = options.ascii_chars.as_bytes();
-        convert::convert_image_to_ascii(input, output, options.font_ratio, options.luminance, options.resolve_bg_threshold(), options.columns, ascii_chars, &options.output_mode, options.cell_color_mode)
+        convert::convert_image_to_ascii(input, output, options.font_ratio, options.luminance, options.resolve_bg_threshold(), options.columns, ascii_chars, &options.output_mode, options.cell_color_mode, options.bg_fit_quality)
     }
 
     /// Convert image to ASCII string (without writing to file)
@@ -750,7 +794,7 @@ impl AsciiConverter {
         }
 
         // Convert frames to ASCII with progress callback
-        let total_frames = if conv_opts.cell_color_mode == CellColorMode::FitForegroundBackgroundOptimized {convert::convert_directory_parallel_optimized_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), conv_opts.columns.unwrap_or(video_opts.columns), keep_images, ascii_chars, &conv_opts.output_mode, progress_callback, self.cancel_token.as_ref())?} else {convert::convert_directory_parallel_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), keep_images, ascii_chars, &conv_opts.output_mode, conv_opts.cell_color_mode, progress_callback, self.cancel_token.as_ref())?};
+        let total_frames = if conv_opts.cell_color_mode == CellColorMode::FitForegroundBackgroundOptimized {convert::convert_directory_parallel_optimized_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), conv_opts.columns.unwrap_or(video_opts.columns), keep_images, ascii_chars, &conv_opts.output_mode, conv_opts.bg_fit_quality, progress_callback, self.cancel_token.as_ref())?} else {convert::convert_directory_parallel_with_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), keep_images, ascii_chars, &conv_opts.output_mode, conv_opts.cell_color_mode, conv_opts.bg_fit_quality, progress_callback, self.cancel_token.as_ref())?};
 
         // Build result with conversion details
         let output_mode_str = match conv_opts.output_mode {
@@ -759,7 +803,7 @@ impl AsciiConverter {
             OutputMode::TextAndColor => "text+color",
         };
 
-        let result = ConversionResult {frame_count: total_frames, columns: conv_opts.columns.unwrap_or(video_opts.columns), font_ratio: conv_opts.font_ratio, luminance: conv_opts.luminance, fps: Some(video_opts.fps), output_mode: output_mode_str.to_string(), audio_extracted: video_opts.extract_audio, output_dir: output_dir.to_path_buf(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds: conv_opts.cell_color_mode.fits_cell_backgrounds(), cell_background_mode: conv_opts.cell_color_mode.as_str().to_string(), bg_luminance: conv_opts.resolve_bg_threshold(), ascii_chars: conv_opts.ascii_chars.clone()};
+        let result = ConversionResult {frame_count: total_frames, columns: conv_opts.columns.unwrap_or(video_opts.columns), font_ratio: conv_opts.font_ratio, luminance: conv_opts.luminance, fps: Some(video_opts.fps), output_mode: output_mode_str.to_string(), audio_extracted: video_opts.extract_audio, output_dir: output_dir.to_path_buf(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds: conv_opts.cell_color_mode.fits_cell_backgrounds(), cell_background_mode: conv_opts.cell_color_mode.as_str().to_string(), bg_fit_quality: conv_opts.bg_fit_quality.as_str().to_string(), bg_luminance: conv_opts.resolve_bg_threshold(), ascii_chars: conv_opts.ascii_chars.clone()};
 
         // Write the details.toml file
         result.write_details_file()?;
@@ -833,7 +877,7 @@ impl AsciiConverter {
         }
 
         // Phase 3: Convert frames to ASCII with progress
-        let total_frames = if conv_opts.cell_color_mode == CellColorMode::FitForegroundBackgroundOptimized {convert::convert_directory_parallel_optimized_with_detailed_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), conv_opts.columns.unwrap_or(video_opts.columns), keep_images, ascii_chars, &conv_opts.output_mode, &progress_callback, self.cancel_token.as_ref())?} else {convert::convert_directory_parallel_with_detailed_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), keep_images, ascii_chars, &conv_opts.output_mode, conv_opts.cell_color_mode, &progress_callback, self.cancel_token.as_ref())?};
+        let total_frames = if conv_opts.cell_color_mode == CellColorMode::FitForegroundBackgroundOptimized {convert::convert_directory_parallel_optimized_with_detailed_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), conv_opts.columns.unwrap_or(video_opts.columns), keep_images, ascii_chars, &conv_opts.output_mode, conv_opts.bg_fit_quality, &progress_callback, self.cancel_token.as_ref())?} else {convert::convert_directory_parallel_with_detailed_progress(output_dir, output_dir, conv_opts.font_ratio, conv_opts.luminance, conv_opts.resolve_bg_threshold(), keep_images, ascii_chars, &conv_opts.output_mode, conv_opts.cell_color_mode, conv_opts.bg_fit_quality, &progress_callback, self.cancel_token.as_ref())?};
 
         // Phase 4: Complete
         progress_callback(Progress::complete(total_frames));
@@ -845,7 +889,7 @@ impl AsciiConverter {
             OutputMode::TextAndColor => "text+color",
         };
 
-        let result = ConversionResult {frame_count: total_frames, columns: conv_opts.columns.unwrap_or(video_opts.columns), font_ratio: conv_opts.font_ratio, luminance: conv_opts.luminance, fps: Some(video_opts.fps), output_mode: output_mode_str.to_string(), audio_extracted: video_opts.extract_audio, output_dir: output_dir.to_path_buf(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds: conv_opts.cell_color_mode.fits_cell_backgrounds(), cell_background_mode: conv_opts.cell_color_mode.as_str().to_string(), bg_luminance: conv_opts.resolve_bg_threshold(), ascii_chars: conv_opts.ascii_chars.clone()};
+        let result = ConversionResult {frame_count: total_frames, columns: conv_opts.columns.unwrap_or(video_opts.columns), font_ratio: conv_opts.font_ratio, luminance: conv_opts.luminance, fps: Some(video_opts.fps), output_mode: output_mode_str.to_string(), audio_extracted: video_opts.extract_audio, output_dir: output_dir.to_path_buf(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds: conv_opts.cell_color_mode.fits_cell_backgrounds(), cell_background_mode: conv_opts.cell_color_mode.as_str().to_string(), bg_fit_quality: conv_opts.bg_fit_quality.as_str().to_string(), bg_luminance: conv_opts.resolve_bg_threshold(), ascii_chars: conv_opts.ascii_chars.clone()};
 
         // Write the details.toml file
         result.write_details_file()?;
@@ -867,9 +911,9 @@ impl AsciiConverter {
         fs::create_dir_all(output_dir)?;
         let ascii_chars = options.ascii_chars.as_bytes();
         if options.cell_color_mode == CellColorMode::FitForegroundBackgroundOptimized {
-            convert::convert_directory_parallel_optimized_with_progress(input_dir, output_dir, options.font_ratio, options.luminance, options.resolve_bg_threshold(), options.columns.unwrap_or(400), keep_images, ascii_chars, &options.output_mode, None::<fn(usize, usize)>, self.cancel_token.as_ref())
+            convert::convert_directory_parallel_optimized_with_progress(input_dir, output_dir, options.font_ratio, options.luminance, options.resolve_bg_threshold(), options.columns.unwrap_or(400), keep_images, ascii_chars, &options.output_mode, options.bg_fit_quality, None::<fn(usize, usize)>, self.cancel_token.as_ref())
         } else {
-            convert::convert_directory_parallel(input_dir, output_dir, options.font_ratio, options.luminance, options.resolve_bg_threshold(), keep_images, ascii_chars, &options.output_mode, options.cell_color_mode, self.cancel_token.as_ref())
+            convert::convert_directory_parallel(input_dir, output_dir, options.font_ratio, options.luminance, options.resolve_bg_threshold(), keep_images, ascii_chars, &options.output_mode, options.cell_color_mode, options.bg_fit_quality, self.cancel_token.as_ref())
         }
     }
 
@@ -906,7 +950,7 @@ impl AsciiConverter {
     pub fn convert_directory_with_progress<F: Fn(Progress) + Send + Sync>(&self, input_dir: &Path, output_dir: &Path, options: &ConversionOptions, keep_images: bool, progress_callback: F) -> Result<usize> {
         fs::create_dir_all(output_dir)?;
         let ascii_chars = options.ascii_chars.as_bytes();
-        convert::convert_directory_parallel_with_detailed_progress(input_dir, output_dir, options.font_ratio, options.luminance, options.resolve_bg_threshold(), keep_images, ascii_chars, &options.output_mode, options.cell_color_mode, &progress_callback, self.cancel_token.as_ref())
+        convert::convert_directory_parallel_with_detailed_progress(input_dir, output_dir, options.font_ratio, options.luminance, options.resolve_bg_threshold(), keep_images, ascii_chars, &options.output_mode, options.cell_color_mode, options.bg_fit_quality, &progress_callback, self.cancel_token.as_ref())
     }
 
     /// Get a preset by name
@@ -971,9 +1015,9 @@ impl AsciiConverter {
         let atlas = render::build_glyph_atlas_with_stroke(to_video_opts.font_size, to_video_opts.text_stroke_width)?;
 
         // Phase 4: Convert first frame to determine output resolution
-        let background_analysis = convert::background_analysis_for_mode(ascii_chars, conv_opts.cell_color_mode)?;
+        let background_analysis = convert::background_analysis_for_mode(ascii_chars, conv_opts.cell_color_mode, conv_opts.bg_fit_quality)?;
         let bg_threshold = conv_opts.resolve_bg_threshold();
-        let first_frame = convert::image_to_ascii_frame_data_with_analysis(&png_paths[0], conv_opts.font_ratio, conv_opts.luminance, bg_threshold, conv_opts.columns, ascii_chars, conv_opts.cell_color_mode, background_analysis.as_ref())?;
+        let first_frame = convert::image_to_ascii_frame_data_with_analysis(&png_paths[0], conv_opts.font_ratio, conv_opts.luminance, bg_threshold, conv_opts.columns, ascii_chars, conv_opts.cell_color_mode, conv_opts.bg_fit_quality, background_analysis.as_ref())?;
         let mut pixel_w = first_frame.width_chars * atlas.cell_width;
         let mut pixel_h = first_frame.height_chars * atlas.cell_height;
         // H.264 requires even dimensions
@@ -1003,7 +1047,7 @@ impl AsciiConverter {
                 for batch_start in (1..total_frames).step_by(batch_size) {
                     let batch_end = (batch_start + batch_size).min(total_frames);
                     let batch = &png_paths[batch_start..batch_end];
-                    let frame_data: Result<Vec<convert::AsciiFrameData>> = batch.par_iter().map(|path| convert::image_to_ascii_frame_data_with_analysis(path, conv_opts.font_ratio, conv_opts.luminance, bg_threshold, conv_opts.columns, ascii_chars, conv_opts.cell_color_mode, background_analysis.as_ref())).collect();
+                    let frame_data: Result<Vec<convert::AsciiFrameData>> = batch.par_iter().map(|path| convert::image_to_ascii_frame_data_with_analysis(path, conv_opts.font_ratio, conv_opts.luminance, bg_threshold, conv_opts.columns, ascii_chars, conv_opts.cell_color_mode, conv_opts.bg_fit_quality, background_analysis.as_ref())).collect();
                     if sender.send(frame_data).is_err() {
                         return;
                     }
@@ -1064,7 +1108,7 @@ impl AsciiConverter {
             OutputMode::TextAndColor => "text+color",
         };
 
-        Ok(ConversionResult {frame_count: total_frames, columns: conv_opts.columns.unwrap_or(video_opts.columns), font_ratio: conv_opts.font_ratio, luminance: conv_opts.luminance, fps: Some(video_opts.fps), output_mode: output_mode_str.to_string(), audio_extracted: to_video_opts.mux_audio, output_dir: to_video_opts.output_path.parent().unwrap_or(Path::new(".")).to_path_buf(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds: conv_opts.cell_color_mode.fits_cell_backgrounds(), cell_background_mode: conv_opts.cell_color_mode.as_str().to_string(), bg_luminance: conv_opts.resolve_bg_threshold(), ascii_chars: conv_opts.ascii_chars.clone()})
+        Ok(ConversionResult {frame_count: total_frames, columns: conv_opts.columns.unwrap_or(video_opts.columns), font_ratio: conv_opts.font_ratio, luminance: conv_opts.luminance, fps: Some(video_opts.fps), output_mode: output_mode_str.to_string(), audio_extracted: to_video_opts.mux_audio, output_dir: to_video_opts.output_path.parent().unwrap_or(Path::new(".")).to_path_buf(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds: conv_opts.cell_color_mode.fits_cell_backgrounds(), cell_background_mode: conv_opts.cell_color_mode.as_str().to_string(), bg_fit_quality: conv_opts.bg_fit_quality.as_str().to_string(), bg_luminance: conv_opts.resolve_bg_threshold(), ascii_chars: conv_opts.ascii_chars.clone()})
     }
 
     /// Render existing ASCII frame files (.cframe or .txt) from a directory to a video file
@@ -1173,7 +1217,7 @@ impl AsciiConverter {
         let mode_str = if use_cframes {"color"} else {"text-only"};
 
         let fit_cell_backgrounds = first_frame.bg_rgb_colors.len() == (first_frame.width_chars * first_frame.height_chars * 3) as usize;
-        Ok(ConversionResult {frame_count: total_frames, columns: first_frame.width_chars, font_ratio: 0.0, luminance: 0, fps: Some(fps), output_mode: mode_str.to_string(), audio_extracted: audio_path.is_some(), output_dir: to_video_opts.output_path.parent().unwrap_or(Path::new(".")).to_path_buf(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds, cell_background_mode: if fit_cell_backgrounds {"legacy"} else {"off"}.to_string(), bg_luminance: 0, ascii_chars: default_ascii_chars()})
+        Ok(ConversionResult {frame_count: total_frames, columns: first_frame.width_chars, font_ratio: 0.0, luminance: 0, fps: Some(fps), output_mode: mode_str.to_string(), audio_extracted: audio_path.is_some(), output_dir: to_video_opts.output_path.parent().unwrap_or(Path::new(".")).to_path_buf(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds, cell_background_mode: if fit_cell_backgrounds {"legacy"} else {"off"}.to_string(), bg_fit_quality: default_bg_fit_quality(), bg_luminance: 0, ascii_chars: default_ascii_chars()})
     }
 }
 
