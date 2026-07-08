@@ -7,12 +7,12 @@ use std::process::{Command as ProcCommand, Stdio};
 use std::sync::OnceLock;
 
 use crate::convert::AsciiFrameData;
-use crate::FfmpegConfig;
+use crate::{BgFitQuality, FfmpegConfig};
 
 /// Embedded monospace font for video rendering
 const FONT_DATA: &[u8] = include_bytes!("../resources/DejaVuSansMono.ttf");
-const ANALYSIS_FONT_SIZE: f32 = 16.0;
-static ANALYSIS_GLYPH_ATLAS: OnceLock<std::result::Result<GlyphAtlas, String>> = OnceLock::new();
+static ANALYSIS_GLYPH_ATLAS_FIDELITY: OnceLock<std::result::Result<GlyphAtlas, String>> = OnceLock::new();
+static ANALYSIS_GLYPH_ATLAS_FAST: OnceLock<std::result::Result<GlyphAtlas, String>> = OnceLock::new();
 
 /// Pre-rasterized bitmap for a single glyph
 struct GlyphBitmap {
@@ -152,8 +152,12 @@ fn thicken_glyph_alpha(alpha: &mut [f32], cell_width: u32, cell_height: u32, tex
     }
 }
 
-fn analysis_glyph_atlas() -> Result<&'static GlyphAtlas> {
-    match ANALYSIS_GLYPH_ATLAS.get_or_init(|| build_glyph_atlas(ANALYSIS_FONT_SIZE).map_err(|e| e.to_string())) {
+fn analysis_glyph_atlas(quality: BgFitQuality) -> Result<&'static GlyphAtlas> {
+    let cache = match quality {
+        BgFitQuality::Fidelity => &ANALYSIS_GLYPH_ATLAS_FIDELITY,
+        BgFitQuality::Fast => &ANALYSIS_GLYPH_ATLAS_FAST,
+    };
+    match cache.get_or_init(|| build_glyph_atlas(quality.analysis_font_size()).map_err(|e| e.to_string())) {
         Ok(atlas) => Ok(atlas),
         Err(message) => Err(anyhow!(message.clone())),
     }
@@ -168,8 +172,8 @@ fn candidate_bytes_for_ascii_chars(ascii_chars: &[u8]) -> Vec<u8> {
     }
 }
 
-pub(crate) fn background_analysis_context(ascii_chars: &[u8]) -> Result<BackgroundAnalysisContext> {
-    Ok(BackgroundAnalysisContext {atlas: analysis_glyph_atlas()?, candidate_bytes: candidate_bytes_for_ascii_chars(ascii_chars)})
+pub(crate) fn background_analysis_context(ascii_chars: &[u8], quality: BgFitQuality) -> Result<BackgroundAnalysisContext> {
+    Ok(BackgroundAnalysisContext {atlas: analysis_glyph_atlas(quality)?, candidate_bytes: candidate_bytes_for_ascii_chars(ascii_chars)})
 }
 
 pub(crate) fn render_ascii_frame_into_rgb(frame: &AsciiFrameData, atlas: &GlyphAtlas, use_colors: bool, buffer: &mut Vec<u8>) {
@@ -250,8 +254,8 @@ pub(crate) fn render_ascii_frame_into_rgb(frame: &AsciiFrameData, atlas: &GlyphA
     }
 }
 
-pub(crate) fn fit_image_to_ascii_with_cell_backgrounds(img_path: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, ascii_chars: &[u8]) -> Result<AsciiFrameData> {
-    let background_analysis = background_analysis_context(ascii_chars)?;
+pub(crate) fn fit_image_to_ascii_with_cell_backgrounds(img_path: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, ascii_chars: &[u8], quality: BgFitQuality) -> Result<AsciiFrameData> {
+    let background_analysis = background_analysis_context(ascii_chars, quality)?;
     fit_image_to_ascii_with_cell_backgrounds_with_context(img_path, font_ratio, threshold, bg_threshold, columns, &background_analysis)
 }
 
@@ -494,7 +498,7 @@ mod tests {
     fn bg_fit_quadrant_both_thresholds_met() -> Result<()> {
         // Uniform gray ≈ 128; thresholds well below it on both axes → glyph + bg.
         let (_dir, path) = write_uniform_test_image(128);
-        let frame = fit_image_to_ascii_with_cell_backgrounds(&path, 0.5, 30, 30, Some(4), b" .M")?;
+        let frame = fit_image_to_ascii_with_cell_backgrounds(&path, 0.5, 30, 30, Some(4), b" .M", BgFitQuality::Fidelity)?;
         let bg = last_cell_bg(&frame);
         // bg should be non-black (matches mid-gray-ish).
         assert!(bg[0] > 5 || bg[1] > 5 || bg[2] > 5, "expected coloured bg, got {:?}", bg);
@@ -507,7 +511,7 @@ mod tests {
     fn bg_fit_quadrant_glyph_only_bg_suppressed() -> Result<()> {
         // fg threshold passes, bg threshold doesn't → glyph + black bg.
         let (_dir, path) = write_uniform_test_image(128);
-        let frame = fit_image_to_ascii_with_cell_backgrounds(&path, 0.5, 30, 200, Some(4), b" .M")?;
+        let frame = fit_image_to_ascii_with_cell_backgrounds(&path, 0.5, 30, 200, Some(4), b" .M", BgFitQuality::Fidelity)?;
         let bg = last_cell_bg(&frame);
         assert_eq!(bg, [0, 0, 0], "bg should be black when bg threshold not met");
         // Glyph still emitted (not all spaces).
@@ -519,7 +523,7 @@ mod tests {
     fn bg_fit_quadrant_bg_only_glyph_suppressed() -> Result<()> {
         // fg threshold fails, bg threshold passes → space + coloured bg ("mosaic" cell).
         let (_dir, path) = write_uniform_test_image(128);
-        let frame = fit_image_to_ascii_with_cell_backgrounds(&path, 0.5, 200, 30, Some(4), b" .M")?;
+        let frame = fit_image_to_ascii_with_cell_backgrounds(&path, 0.5, 200, 30, Some(4), b" .M", BgFitQuality::Fidelity)?;
         let bg = last_cell_bg(&frame);
         assert!(bg[0] > 5 || bg[1] > 5 || bg[2] > 5, "expected coloured bg, got {:?}", bg);
         // Every glyph should be a space.
@@ -533,7 +537,7 @@ mod tests {
     fn bg_fit_quadrant_neither_threshold_met() -> Result<()> {
         // Both thresholds above luminance → empty cells.
         let (_dir, path) = write_uniform_test_image(64);
-        let frame = fit_image_to_ascii_with_cell_backgrounds(&path, 0.5, 200, 200, Some(4), b" .M")?;
+        let frame = fit_image_to_ascii_with_cell_backgrounds(&path, 0.5, 200, 200, Some(4), b" .M", BgFitQuality::Fidelity)?;
         assert!(frame.bg_rgb_colors.iter().all(|&b| b == 0), "expected all-black bg");
         assert!(frame.rgb_colors.iter().all(|&b| b == 0), "expected all-black fg");
         assert_eq!(first_glyph(&frame), ' ');
@@ -545,7 +549,7 @@ mod tests {
         // With bg_threshold == threshold, behaviour reduces to the legacy
         // single-threshold output: cells either fully present or fully empty.
         let (_dir, path) = write_uniform_test_image(128);
-        let frame = fit_image_to_ascii_with_cell_backgrounds(&path, 0.5, 50, 50, Some(4), b" .M")?;
+        let frame = fit_image_to_ascii_with_cell_backgrounds(&path, 0.5, 50, 50, Some(4), b" .M", BgFitQuality::Fidelity)?;
         // For every cell, bg is either entirely the cell colour or entirely black —
         // never partial.
         for chunk in frame.bg_rgb_colors.chunks_exact(3) {

@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use cascii::loop_detect::{run_find_loop_with_options, LoopDetectionOptions, LoopMatchMode};
 use cascii::preprocessing::{detect_preprocess_input_kind, preprocess_directory, preprocess_image_to_file, preprocess_image_to_temp, preprocess_video_to_file, resolve_preprocess_filter, resolve_preprocess_output_path, PreprocessInputKind, PREPROCESS_PRESETS};
-use cascii::{crop_frames, run_trim, AppConfig, AsciiConverter, CellColorMode, ConversionOptions, OutputMode, Progress, ProgressPhase, ToVideoOptions, VideoOptions};
+use cascii::{crop_frames, run_trim, AppConfig, AsciiConverter, BgFitQuality, CellColorMode, ConversionOptions, OutputMode, Progress, ProgressPhase, ToVideoOptions, VideoOptions};
 use clap::{Parser, Subcommand, ValueEnum};
 use dialoguer::{Confirm, FuzzySelect, Input};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -142,6 +142,15 @@ struct Args {
     /// a cell-background fitting mode is enabled.
     #[arg(long)]
     bg_luminance: Option<u8>,
+
+    /// Faster, lower-resolution cell-background fitting. Only effective when
+    /// a cell-background fitting mode is enabled.
+    #[arg(long, default_value_t = false, conflicts_with = "fidelity")]
+    fast: bool,
+
+    /// Full-resolution cell-background fitting (the default; makes the choice explicit)
+    #[arg(long, default_value_t = false, conflicts_with = "fast")]
+    fidelity: bool,
 
     /// Extract audio from video to audio.mp3
     #[arg(long, default_value_t = false)]
@@ -464,8 +473,13 @@ fn main() -> Result<()> {
         eprintln!("warning: cell-background fitting has no effect with text-only output; pass --colors or --to-video to use the generated backgrounds.");
     }
 
+    let bg_fit_quality = if args.fast {BgFitQuality::Fast} else {BgFitQuality::Fidelity};
+    if (args.fast || args.fidelity) && !cell_color_mode.fits_cell_backgrounds() {
+        eprintln!("warning: --fast/--fidelity only affect cell-background fitting; pass --fit-cell-backgrounds or --fit-cell-backgrounds-optimized to use them.");
+    }
+
     // Create conversion options
-    let conv_opts = ConversionOptions {columns: Some(columns), font_ratio, luminance, bg_luminance: args.bg_luminance, ascii_chars: cfg.ascii_chars.clone(), output_mode: output_mode.clone(), cell_color_mode};
+    let conv_opts = ConversionOptions {columns: Some(columns), font_ratio, luminance, bg_luminance: args.bg_luminance, ascii_chars: cfg.ascii_chars.clone(), output_mode: output_mode.clone(), cell_color_mode, bg_fit_quality};
 
     if input_path.is_file() {
         if is_image_input {
@@ -651,7 +665,7 @@ fn main() -> Result<()> {
                 OutputMode::TextAndColor => "text+color",
             };
 
-            let result = cascii::ConversionResult {frame_count, columns, font_ratio, luminance, fps: None, output_mode: mode_str.to_string(), audio_extracted: false, output_dir: output_path.clone(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds: cell_color_mode.fits_cell_backgrounds(), cell_background_mode: cell_color_mode.as_str().to_string(), bg_luminance: args.bg_luminance.unwrap_or(luminance), ascii_chars: conv_opts.ascii_chars.clone()};
+            let result = cascii::ConversionResult {frame_count, columns, font_ratio, luminance, fps: None, output_mode: mode_str.to_string(), audio_extracted: false, output_dir: output_path.clone(), background_color: "black".to_string(), color: "white".to_string(), fit_cell_backgrounds: cell_color_mode.fits_cell_backgrounds(), cell_background_mode: cell_color_mode.as_str().to_string(), bg_fit_quality: bg_fit_quality.as_str().to_string(), bg_luminance: args.bg_luminance.unwrap_or(luminance), ascii_chars: conv_opts.ascii_chars.clone()};
 
             result.write_details_file().context("writing details file")?;
             let details = result.to_details_string();
