@@ -8,6 +8,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
+use crate::cell_filter::luminance_rgb;
 use crate::{background_fit_optimized, render, BgFitQuality, CancelToken, Cancelled, CellColorMode, OutputMode, Progress};
 
 /// Intermediate representation of one converted ASCII frame
@@ -401,10 +402,6 @@ pub(crate) fn read_txt_to_frame_data(path: &Path) -> Result<AsciiFrameData> {
     let ascii_text = lines.join("\n") + "\n";
 
     Ok(AsciiFrameData {ascii_text, width_chars: width, height_chars: height, rgb_colors: Vec::new(), /* empty = renderer uses white */ bg_rgb_colors: Vec::new()})
-}
-
-fn luminance_rgb(r: u8, g: u8, b: u8) -> u8 {
-    ((2126 * r as u32 + 7152 * g as u32 + 722 * b as u32) / 10000) as u8
 }
 
 fn char_for(luma: u8, threshold: u8, ascii_chars: &[u8]) -> char {

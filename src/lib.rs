@@ -68,6 +68,7 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 mod background_fit_optimized;
+pub mod cell_filter;
 pub mod color_shift;
 pub mod convert;
 pub mod crop;
