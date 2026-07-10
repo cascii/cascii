@@ -1,10 +1,7 @@
-//! Per-cell luminance filtering for `.cframe` payloads and text frames.
+//! Per-cell filtering for `.cframe` payloads and text frames.
 //!
-//! Used to gate cell selections (e.g. a lasso capture) by brightness: cells
-//! whose luminance falls outside an inclusive range are reported as failing so
-//! callers can blank them per frame. The filter only ever fails cells it can
-//! positively judge — out-of-bounds cells and characters absent from the ascii
-//! ramp pass.
+//! Used to gate cell selections (e.g. a lasso capture) by brightness or by local color coherence: failing cells are reported so callers can blank them per frame. 
+//! Filters only ever fail cells they can positively judge out-of-bounds cells and characters absent from the ascii ramp pass.
 
 use anyhow::{anyhow, Result};
 
@@ -59,6 +56,67 @@ impl LuminanceFilter {
 /// Returns one bool per entry in `cells` (parallel array): `true` = keep, `false` = the cell's luminance is dropped by the filter.
 /// Cells outside the frame grid return `true` — the mask is purely a "would luminance blank this cell" predicate, and consumers already skip out-of-bounds cells themselves.
 pub fn cframe_cells_luminance_mask(data: &[u8], cells: &[(usize, usize)], filter: LuminanceFilter) -> Result<Vec<bool>> {
+    let (width, height) = validated_cframe_dimensions(data)?;
+
+    Ok(cells.iter().map(|&(row, col)| {
+        if row >= height || col >= width {
+            return true;
+        }
+        filter.passes(luminance_rgb_at(data, width, row, col))
+    }).collect())
+}
+
+/// Scaled Euclidean RGB distance in `0..=255` (white vs black = 255).
+#[inline]
+pub fn rgb_distance(left: (u8, u8, u8), right: (u8, u8, u8)) -> u8 {
+    let dr = left.0 as i32 - right.0 as i32;
+    let dg = left.1 as i32 - right.1 as i32;
+    let db = left.2 as i32 - right.2 as i32;
+    (((dr * dr + dg * dg + db * db) as f32 / 3.0).sqrt().round() as u32).min(255) as u8
+}
+
+/// Local color-coherence gate: a cell passes when at least `min_neighbors` of its (up to 8) in-grid neighbors sit within `tolerance` color distance of it. 
+/// Coherent same-color regions pass; cells contrasting with their surroundings fail. `min_neighbors` is clamped to `1..=8` and to the number of in-grid neighbors, so border cells are not unfairly dropped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProximityFilter {
+    pub tolerance: u8,
+    pub min_neighbors: u8,
+}
+
+/// Evaluate the local color coherence of each `(row, col)` cell in a raw `.cframe` payload. Returns one bool per entry in `cells` (parallel array):
+/// `true` = keep. Cells outside the frame grid return `true`. Blank cells carry their stored foreground color (black), so a blank neighborhood is self-coherent — pair this filter with a luminance gate to drop it too.
+pub fn cframe_cells_proximity_mask(data: &[u8], cells: &[(usize, usize)], filter: ProximityFilter) -> Result<Vec<bool>> {
+    let (width, height) = validated_cframe_dimensions(data)?;
+
+    Ok(cells.iter().map(|&(row, col)| {
+        if row >= height || col >= width {
+            return true;
+        }
+        let cell_rgb = rgb_at(data, width, row, col);
+        let mut neighbors = 0u8;
+        let mut similar = 0u8;
+        for row_delta in -1isize..=1 {
+            for col_delta in -1isize..=1 {
+                if row_delta == 0 && col_delta == 0 {
+                    continue;
+                }
+                let (Some(neighbor_row), Some(neighbor_col)) = (row.checked_add_signed(row_delta), col.checked_add_signed(col_delta)) else {
+                    continue;
+                };
+                if neighbor_row >= height || neighbor_col >= width {
+                    continue;
+                }
+                neighbors += 1;
+                if rgb_distance(cell_rgb, rgb_at(data, width, neighbor_row, neighbor_col)) <= filter.tolerance {
+                    similar += 1;
+                }
+            }
+        }
+        similar >= filter.min_neighbors.clamp(1, 8).min(neighbors.max(1))
+    }).collect())
+}
+
+fn validated_cframe_dimensions(data: &[u8]) -> Result<(usize, usize)> {
     if data.len() < HEADER_SIZE {
         return Err(anyhow!("cframe file too small"));
     }
@@ -76,13 +134,19 @@ pub fn cframe_cells_luminance_mask(data: &[u8], cells: &[(usize, usize)], filter
         return Err(anyhow!("cframe file truncated: expected at least {} bytes, got {}", body_end, data.len()));
     }
 
-    Ok(cells.iter().map(|&(row, col)| {
-        if row >= height || col >= width {
-            return true;
-        }
-        let offset = HEADER_SIZE + (row * width + col) * CELL_SIZE + 1;
-        filter.passes(luminance_rgb(data[offset], data[offset + 1], data[offset + 2]))
-    }).collect())
+    Ok((width, height))
+}
+
+#[inline]
+fn rgb_at(data: &[u8], width: usize, row: usize, col: usize) -> (u8, u8, u8) {
+    let offset = HEADER_SIZE + (row * width + col) * CELL_SIZE + 1;
+    (data[offset], data[offset + 1], data[offset + 2])
+}
+
+#[inline]
+fn luminance_rgb_at(data: &[u8], width: usize, row: usize, col: usize) -> u8 {
+    let (r, g, b) = rgb_at(data, width, row, col);
+    luminance_rgb(r, g, b)
 }
 
 /// Maps ASCII glyphs to a 0-255 pseudo-luminance from their position in an ascii ramp (dark chars first), for filtering text-only frames.
@@ -215,6 +279,58 @@ mod tests {
         assert!(cframe_cells_luminance_mask(&cframe(0, 0, &[]), &[], filter).is_err());
         let truncated = cframe(2, 1, &[[b'#', 255, 255, 255]]);
         assert!(cframe_cells_luminance_mask(&truncated, &[], filter).is_err());
+    }
+
+    #[test]
+    fn test_rgb_distance_reference_values() {
+        assert_eq!(rgb_distance((0, 0, 0), (0, 0, 0)), 0);
+        assert_eq!(rgb_distance((255, 255, 255), (0, 0, 0)), 255);
+        assert_eq!(rgb_distance((255, 0, 0), (0, 0, 0)), 147);
+        assert_eq!(rgb_distance((200, 100, 0), (210, 110, 10)), 10);
+    }
+
+    #[test]
+    fn test_proximity_mask_keeps_coherent_regions_and_drops_outliers() {
+        // 3x3 frame: all orange except an isolated bright blue center-right cell; center cell surrounded by its own color everywhere.
+        let orange = [b'#', 220, 120, 10];
+        let blue = [b'#', 20, 40, 220];
+        let data = cframe(3, 3, &[orange, orange, orange, orange, orange, blue, orange, orange, orange]);
+        let filter = ProximityFilter {tolerance: 40, min_neighbors: 3};
+
+        let mask = cframe_cells_proximity_mask(&data, &[(1, 1), (1, 2), (0, 0)], filter).unwrap();
+        // Center: 7 similar of 8. Blue outlier: 0 similar. Corner: 2 of 3 in-grid neighbors are orange (one is the blue cell); min_neighbors clamps to the 3 available, so 2 < 3 fails... unless similar >= min.
+        assert!(mask[0]);
+        assert!(!mask[1]);
+
+        // Corner (0,0): neighbors (0,1) orange, (1,0) orange, (1,1) orange -> 3 similar.
+        assert!(mask[2]);
+    }
+
+    #[test]
+    fn test_proximity_mask_border_cells_clamp_required_neighbors() {
+        // 1x2 frame: each cell has exactly one neighbor. min_neighbors=8 clamps to the single available neighbor.
+        let orange = [b'#', 220, 120, 10];
+        let data = cframe(2, 1, &[orange, orange]);
+        let filter = ProximityFilter {tolerance: 10, min_neighbors: 8};
+        let mask = cframe_cells_proximity_mask(&data, &[(0, 0), (0, 1)], filter).unwrap();
+        assert_eq!(mask, vec![true, true]);
+
+        let blue = [b'#', 20, 40, 220];
+        let data = cframe(2, 1, &[orange, blue]);
+        let mask = cframe_cells_proximity_mask(&data, &[(0, 0), (0, 1)], filter).unwrap();
+        assert_eq!(mask, vec![false, false]);
+    }
+
+    #[test]
+    fn test_proximity_mask_out_of_bounds_and_malformed() {
+        let orange = [b'#', 220, 120, 10];
+        let data = cframe(2, 1, &[orange, orange]);
+        let filter = ProximityFilter {tolerance: 10, min_neighbors: 1};
+        let mask = cframe_cells_proximity_mask(&data, &[(9, 9)], filter).unwrap();
+        assert_eq!(mask, vec![true]);
+
+        assert!(cframe_cells_proximity_mask(&[0, 0, 0], &[], filter).is_err());
+        assert!(cframe_cells_proximity_mask(&cframe(0, 0, &[]), &[], filter).is_err());
     }
 
     #[test]
