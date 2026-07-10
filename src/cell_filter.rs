@@ -75,44 +75,47 @@ pub fn rgb_distance(left: (u8, u8, u8), right: (u8, u8, u8)) -> u8 {
     (((dr * dr + dg * dg + db * db) as f32 / 3.0).sqrt().round() as u32).min(255) as u8
 }
 
-/// Local color-coherence gate: a cell passes when at least `min_neighbors` of its (up to 8) in-grid neighbors sit within `tolerance` color distance of it. 
-/// Coherent same-color regions pass; cells contrasting with their surroundings fail. `min_neighbors` is clamped to `1..=8` and to the number of in-grid neighbors, so border cells are not unfairly dropped.
+/// Local color-dominance gate: a cell passes when its color sits within `tolerance` of the mean color of the visible glyphs in the surrounding window of `radius` cells (clamped to `1..=4`).
+/// Cells matching their region's dominant color pass — including across smooth gradients, since the local mean tracks the gradient — while cells contrasting with the region fail.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProximityFilter {
     pub tolerance: u8,
-    pub min_neighbors: u8,
+    pub radius: u8,
 }
 
-/// Evaluate the local color coherence of each `(row, col)` cell in a raw `.cframe` payload. Returns one bool per entry in `cells` (parallel array):
-/// `true` = keep. Cells outside the frame grid return `true`. Blank cells carry their stored foreground color (black), so a blank neighborhood is self-coherent — pair this filter with a luminance gate to drop it too.
+/// Evaluate the local color dominance of each `(row, col)` cell in a raw `.cframe` payload. Returns one bool per entry in `cells` (parallel array): `true` = keep.
+/// Cells outside the frame grid pass. Blank glyphs are invisible: they always pass, and they are excluded from the neighborhood mean so they cannot drag a bright region's dominant color toward black. Cells with no visible neighbor in the window pass (nothing to judge against).
 pub fn cframe_cells_proximity_mask(data: &[u8], cells: &[(usize, usize)], filter: ProximityFilter) -> Result<Vec<bool>> {
     let (width, height) = validated_cframe_dimensions(data)?;
+    let radius = filter.radius.clamp(1, 4) as isize;
 
     Ok(cells.iter().map(|&(row, col)| {
-        if row >= height || col >= width {
+        if row >= height || col >= width || is_blank_at(data, width, row, col) {
             return true;
         }
-        let cell_rgb = rgb_at(data, width, row, col);
-        let mut neighbors = 0u8;
-        let mut similar = 0u8;
-        for row_delta in -1isize..=1 {
-            for col_delta in -1isize..=1 {
+        let mut sum = (0u32, 0u32, 0u32);
+        let mut count = 0u32;
+        for row_delta in -radius..=radius {
+            for col_delta in -radius..=radius {
                 if row_delta == 0 && col_delta == 0 {
                     continue;
                 }
                 let (Some(neighbor_row), Some(neighbor_col)) = (row.checked_add_signed(row_delta), col.checked_add_signed(col_delta)) else {
                     continue;
                 };
-                if neighbor_row >= height || neighbor_col >= width {
+                if neighbor_row >= height || neighbor_col >= width || is_blank_at(data, width, neighbor_row, neighbor_col) {
                     continue;
                 }
-                neighbors += 1;
-                if rgb_distance(cell_rgb, rgb_at(data, width, neighbor_row, neighbor_col)) <= filter.tolerance {
-                    similar += 1;
-                }
+                let (r, g, b) = rgb_at(data, width, neighbor_row, neighbor_col);
+                sum = (sum.0 + r as u32, sum.1 + g as u32, sum.2 + b as u32);
+                count += 1;
             }
         }
-        similar >= filter.min_neighbors.clamp(1, 8).min(neighbors.max(1))
+        if count == 0 {
+            return true;
+        }
+        let mean = ((sum.0 / count) as u8, (sum.1 / count) as u8, (sum.2 / count) as u8);
+        rgb_distance(rgb_at(data, width, row, col), mean) <= filter.tolerance
     }).collect())
 }
 
@@ -141,6 +144,12 @@ fn validated_cframe_dimensions(data: &[u8]) -> Result<(usize, usize)> {
 fn rgb_at(data: &[u8], width: usize, row: usize, col: usize) -> (u8, u8, u8) {
     let offset = HEADER_SIZE + (row * width + col) * CELL_SIZE + 1;
     (data[offset], data[offset + 1], data[offset + 2])
+}
+
+#[inline]
+fn is_blank_at(data: &[u8], width: usize, row: usize, col: usize) -> bool {
+    let ch = data[HEADER_SIZE + (row * width + col) * CELL_SIZE];
+    ch == b' ' || ch == 0
 }
 
 #[inline]
@@ -290,32 +299,49 @@ mod tests {
     }
 
     #[test]
-    fn test_proximity_mask_keeps_coherent_regions_and_drops_outliers() {
-        // 3x3 frame: all orange except an isolated bright blue center-right cell; center cell surrounded by its own color everywhere.
+    fn test_proximity_mask_keeps_dominant_region_and_drops_outliers() {
+        // 3x3 frame: all orange except an isolated bright blue center-right cell. Orange cells match the local mean; the blue cell contrasts with its all-orange surroundings.
         let orange = [b'#', 220, 120, 10];
         let blue = [b'#', 20, 40, 220];
         let data = cframe(3, 3, &[orange, orange, orange, orange, orange, blue, orange, orange, orange]);
-        let filter = ProximityFilter {tolerance: 40, min_neighbors: 3};
+        let filter = ProximityFilter {tolerance: 40, radius: 1};
 
         let mask = cframe_cells_proximity_mask(&data, &[(1, 1), (1, 2), (0, 0)], filter).unwrap();
-        // Center: 7 similar of 8. Blue outlier: 0 similar. Corner: 2 of 3 in-grid neighbors are orange (one is the blue cell); min_neighbors clamps to the 3 available, so 2 < 3 fails... unless similar >= min.
-        assert!(mask[0]);
-        assert!(!mask[1]);
-
-        // Corner (0,0): neighbors (0,1) orange, (1,0) orange, (1,1) orange -> 3 similar.
-        assert!(mask[2]);
+        assert_eq!(mask, vec![true, false, true]);
     }
 
     #[test]
-    fn test_proximity_mask_border_cells_clamp_required_neighbors() {
-        // 1x2 frame: each cell has exactly one neighbor. min_neighbors=8 clamps to the single available neighbor.
+    fn test_proximity_mask_keeps_smooth_gradients() {
+        // 5x1 horizontal gradient: no two adjacent cells share a color, but every interior cell sits exactly on its local mean, so even a tiny tolerance keeps the gradient.
+        let cells: Vec<[u8; 4]> = (0..5).map(|index| [b'#', index * 50, index * 25, 0]).collect();
+        let data = cframe(5, 1, &cells);
+        let filter = ProximityFilter {tolerance: 5, radius: 1};
+        let mask = cframe_cells_proximity_mask(&data, &[(0, 1), (0, 2), (0, 3)], filter).unwrap();
+        assert_eq!(mask, vec![true; 3]);
+    }
+
+    #[test]
+    fn test_proximity_mask_blank_cells_pass_and_are_excluded_from_mean() {
+        // Orange cell surrounded by blanks (black fg): blanks pass and must not drag the mean toward black, so the orange cell passes too.
         let orange = [b'#', 220, 120, 10];
+        let blank = [b' ', 0, 0, 0];
+        let data = cframe(3, 3, &[blank, blank, blank, blank, orange, blank, blank, blank, blank]);
+        let filter = ProximityFilter {tolerance: 10, radius: 1};
+        let mask = cframe_cells_proximity_mask(&data, &[(1, 1), (0, 0)], filter).unwrap();
+        assert_eq!(mask, vec![true, true]);
+    }
+
+    #[test]
+    fn test_proximity_mask_contrasting_pair_fails_both_ways() {
+        // 1x2 frame: each cell's only visible neighbor is the other, so a contrasting pair fails on both sides while a matching pair passes.
+        let orange = [b'#', 220, 120, 10];
+        let blue = [b'#', 20, 40, 220];
+        let filter = ProximityFilter {tolerance: 10, radius: 4};
+
         let data = cframe(2, 1, &[orange, orange]);
-        let filter = ProximityFilter {tolerance: 10, min_neighbors: 8};
         let mask = cframe_cells_proximity_mask(&data, &[(0, 0), (0, 1)], filter).unwrap();
         assert_eq!(mask, vec![true, true]);
 
-        let blue = [b'#', 20, 40, 220];
         let data = cframe(2, 1, &[orange, blue]);
         let mask = cframe_cells_proximity_mask(&data, &[(0, 0), (0, 1)], filter).unwrap();
         assert_eq!(mask, vec![false, false]);
@@ -325,7 +351,7 @@ mod tests {
     fn test_proximity_mask_out_of_bounds_and_malformed() {
         let orange = [b'#', 220, 120, 10];
         let data = cframe(2, 1, &[orange, orange]);
-        let filter = ProximityFilter {tolerance: 10, min_neighbors: 1};
+        let filter = ProximityFilter {tolerance: 10, radius: 1};
         let mask = cframe_cells_proximity_mask(&data, &[(9, 9)], filter).unwrap();
         assert_eq!(mask, vec![true]);
 
