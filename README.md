@@ -53,6 +53,27 @@ Add to your `Cargo.toml`:
 cascii = "0.1"
 ```
 
+### In the browser (wasm)
+
+Disabling the default `cli` feature drops the filesystem/ffmpeg pipeline and its CLI dependencies (`clap`, `dialoguer`, `indicatif`, `rayon`, `walkdir`, `dirs`, `ab_glyph`), leaving a core that compiles for `wasm32-unknown-unknown`:
+
+```toml
+[dependencies]
+cascii = { version = "0.31", default-features = false }
+```
+
+The core exposes the in-memory single-image API in the `frame` module — no filesystem, no subprocesses, no threads:
+
+```rust
+use cascii::{image_bytes_to_frame, ConversionOptions};
+
+let frame = image_bytes_to_frame(&png_or_jpeg_bytes, &ConversionOptions::default().with_columns(200))?;
+let text = &frame.text;              // ASCII art, rows separated by '\n'
+let cframe = frame.cframe_bytes();   // .cframe binary (char + RGB per cell)
+```
+
+Only `CellColorMode::ForegroundOnly` is supported in memory; the background-fitting modes stay in the filesystem pipeline.
+
 ## CLI Usage
 
 ### cascii

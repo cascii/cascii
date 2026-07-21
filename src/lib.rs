@@ -12,7 +12,8 @@
 //!
 //! ## Example
 //!
-//! ```no_run
+#![cfg_attr(feature = "cli", doc = "```no_run")]
+#![cfg_attr(not(feature = "cli"), doc = "```ignore")]
 //! use cascii::{AsciiConverter, ConversionOptions};
 //! use std::path::Path;
 //!
@@ -25,11 +26,29 @@
 //! # }
 //! ```
 //!
+//! ## In-memory conversion (wasm-compatible)
+//!
+//! With `default-features = false` the crate drops the filesystem/ffmpeg pipeline and its CLI
+//! dependencies, leaving the `frame` module, which converts image bytes entirely in memory:
+//!
+//! ```no_run
+//! use cascii::{image_bytes_to_frame, ConversionOptions};
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let png_bytes: Vec<u8> = vec![];
+//! let frame = image_bytes_to_frame(&png_bytes, &ConversionOptions::default().with_columns(200))?;
+//! let text: &str = &frame.text;
+//! let cframe: Vec<u8> = frame.cframe_bytes();
+//! # Ok(())
+//! # }
+//! ```
+//!
 //! ## Progress Reporting
 //!
 //! For video conversions, you can receive detailed progress updates:
 //!
-//! ```no_run
+#![cfg_attr(feature = "cli", doc = "```no_run")]
+#![cfg_attr(not(feature = "cli"), doc = "```ignore")]
 //! use cascii::{AsciiConverter, ConversionOptions, VideoOptions, Progress, ProgressPhase};
 //! use std::path::Path;
 //!
@@ -58,25 +77,44 @@
 //! ).unwrap();
 //! ```
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
+#[cfg(feature = "cli")]
+use anyhow::anyhow;
+#[cfg(feature = "cli")]
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "cli")]
 use std::ffi::OsStr;
 use std::fs;
+#[cfg(feature = "cli")]
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+#[cfg(feature = "cli")]
+use std::path::Path;
+#[cfg(feature = "cli")]
 use walkdir::WalkDir;
 
+#[cfg(feature = "cli")]
 mod background_fit_optimized;
 pub mod cell_filter;
 pub mod color_shift;
+#[cfg(feature = "cli")]
 pub mod convert;
+#[cfg(feature = "cli")]
 pub mod crop;
+pub mod frame;
+#[cfg(feature = "cli")]
 pub mod loop_detect;
+#[cfg(feature = "cli")]
 pub mod packed;
+#[cfg(feature = "cli")]
 pub mod preprocessing;
+#[cfg(feature = "cli")]
 pub mod render;
+#[cfg(feature = "cli")]
 pub mod video;
+
+pub use frame::{image_bytes_to_frame, image_to_frame, ImageFrame};
 
 /// A cheap, clonable cancellation flag shared between a running conversion and
 /// the code that wants to stop it.
@@ -164,11 +202,13 @@ impl FfmpegConfig {
     }
 
     /// Get the ffmpeg command name or path
+    #[cfg(feature = "cli")]
     pub(crate) fn ffmpeg_cmd(&self) -> &OsStr {
         self.ffmpeg_path.as_ref().map(|p| p.as_os_str()).unwrap_or(OsStr::new("ffmpeg"))
     }
 
     /// Get the ffprobe command name or path
+    #[cfg(feature = "cli")]
     pub(crate) fn ffprobe_cmd(&self) -> &OsStr {
         self.ffprobe_path.as_ref().map(|p| p.as_os_str()).unwrap_or(OsStr::new("ffprobe"))
     }
@@ -434,6 +474,7 @@ impl BgFitQuality {
         }
     }
 
+    #[cfg(feature = "cli")]
     pub(crate) fn analysis_font_size(self) -> f32 {
         match self {
             Self::Fidelity => 16.0,
@@ -598,12 +639,14 @@ impl Default for ToVideoOptions {
 }
 
 /// Main converter struct for ASCII art generation
+#[cfg(feature = "cli")]
 pub struct AsciiConverter {
     config: AppConfig,
     ffmpeg_config: FfmpegConfig,
     cancel_token: Option<CancelToken>,
 }
 
+#[cfg(feature = "cli")]
 impl AsciiConverter {
     /// Create a new converter with default configuration
     pub fn new() -> Self {
@@ -1187,6 +1230,12 @@ impl AsciiConverter {
 
             // Render and pipe sequentially
             for frame in &frame_data {
+                if self.cancel_token.as_ref().is_some_and(|token| token.is_cancelled()) {
+                    drop(stdin);
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(Cancelled.into());
+                }
                 render::render_ascii_frame_into_rgb(frame, &atlas, render_with_colors, &mut rgb_buf);
                 if let Err(e) = stdin.write_all(&rgb_buf) {
                     drop(stdin);
@@ -1222,6 +1271,7 @@ impl AsciiConverter {
     }
 }
 
+#[cfg(feature = "cli")]
 impl Default for AsciiConverter {
     fn default() -> Self {
         Self::new()
@@ -1229,4 +1279,5 @@ impl Default for AsciiConverter {
 }
 
 // Re-export crop API
+#[cfg(feature = "cli")]
 pub use crop::{crop_frames, run_trim, CropResult};
