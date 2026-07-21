@@ -1,6 +1,6 @@
 [package]
 name = "cascii"
-version = "0.31.1"
+version = "0.32.0"
 edition = "2021"
 authors = ["cascii contributors"]
 description = "High-performance ASCII art generator for images and videos"
@@ -28,17 +28,32 @@ path = "src/lib.rs"
 [[bin]]
 name = "cascii"
 path = "src/main.rs"
+required-features = ["cli"]
+
+[[example]]
+name = "simple_image"
+required-features = ["cli"]
+
+[[example]]
+name = "simple_video"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+# The filesystem/ffmpeg pipeline and interactive CLI. Disable (default-features = false) for a
+# wasm-compatible core exposing the in-memory single-image API in the `frame` module.
+cli = ["dep:ab_glyph", "dep:clap", "dep:dialoguer", "dep:dirs", "dep:indicatif", "dep:rayon", "dep:walkdir"]
 
 [dependencies]
-ab_glyph = "0.2"
+ab_glyph = { version = "0.2", optional = true }
 anyhow = "1.0"
-clap = { version = "4.5", features = ["derive"] }
-dialoguer = { version = "0.11", features = ["fuzzy-select"] }
+clap = { version = "4.5", features = ["derive"], optional = true }
+dialoguer = { version = "0.11", features = ["fuzzy-select"], optional = true }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
-indicatif = { version = "0.17", features = ["rayon"] }
-rayon = "1.10"
-walkdir = "2.5"
-dirs = "5"
+indicatif = { version = "0.17", features = ["rayon"], optional = true }
+rayon = { version = "1.10", optional = true }
+walkdir = { version = "2.5", optional = true }
+dirs = { version = "5", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"

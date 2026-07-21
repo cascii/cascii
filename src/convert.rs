@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Context, Result};
-use image::DynamicImage;
 use rayon::prelude::*;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
@@ -8,7 +7,6 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-use crate::cell_filter::luminance_rgb;
 use crate::{background_fit_optimized, render, BgFitQuality, CancelToken, Cancelled, CellColorMode, OutputMode, Progress};
 
 /// Intermediate representation of one converted ASCII frame
@@ -118,76 +116,18 @@ fn write_frame_cframe(frame: &AsciiFrameData, path: &Path, cell_color_mode: Cell
 }
 
 pub(crate) fn image_to_ascii_string(img_path: &Path, font_ratio: f32, threshold: u8, columns: Option<u32>, ascii_chars: &[u8]) -> Result<String> {
-    let mut img = image::open(img_path).with_context(|| format!("opening {}", img_path.display()))?.to_rgb8();
-
-    let (orig_w, orig_h) = img.dimensions();
-    let (target_w, target_h) = if let Some(cols) = columns {
-        let w = cols;
-        let h = (orig_h as f32 / orig_w as f32 * cols as f32 * font_ratio).round() as u32;
-        (w, h.max(1))
-    } else {
-        let w = orig_w;
-        let h = (orig_h as f32 * font_ratio).round() as u32;
-        (w, h.max(1))
-    };
-
-    if target_w != orig_w || target_h != orig_h {
-        let dyn_img = DynamicImage::ImageRgb8(img);
-        img = dyn_img.resize_exact(target_w, target_h, image::imageops::FilterType::Triangle).to_rgb8();
-    }
-
-    let (w, h) = img.dimensions();
-    let mut out = String::with_capacity((w as usize + 1) * (h as usize));
-    for row in img.as_raw().chunks_exact(w as usize * 3) {
-        for px in row.chunks_exact(3) {
-            let l = luminance_rgb(px[0], px[1], px[2]);
-            out.push(char_for(l, threshold, ascii_chars));
-        }
-        out.push('\n');
-    }
-    Ok(out)
+    let img = image::open(img_path).with_context(|| format!("opening {}", img_path.display()))?.to_rgb8();
+    Ok(crate::frame::rgb_image_to_ascii_with_colors(img, font_ratio, threshold, columns, ascii_chars).0)
 }
 
 /// Returns (ascii_string, width, height, rgb_bytes)
 /// rgb_bytes is a flat Vec<u8> with 3 bytes (R, G, B) per character, row-major order
 pub(crate) fn image_to_ascii_with_colors(img_path: &Path, font_ratio: f32, threshold: u8, columns: Option<u32>, ascii_chars: &[u8]) -> Result<(String, u32, u32, Vec<u8>)> {
-    let mut img = image::open(img_path).with_context(|| format!("opening {}", img_path.display()))?.to_rgb8();
-
-    let (orig_w, orig_h) = img.dimensions();
-    let (target_w, target_h) = if let Some(cols) = columns {
-        let w = cols;
-        let h = (orig_h as f32 / orig_w as f32 * cols as f32 * font_ratio).round() as u32;
-        (w, h.max(1))
-    } else {
-        let w = orig_w;
-        let h = (orig_h as f32 * font_ratio).round() as u32;
-        (w, h.max(1))
-    };
-
-    if target_w != orig_w || target_h != orig_h {
-        let dyn_img = DynamicImage::ImageRgb8(img);
-        img = dyn_img.resize_exact(target_w, target_h, image::imageops::FilterType::Triangle).to_rgb8();
-    }
-
-    let (w, h) = img.dimensions();
-    let rgb_data = img.into_raw();
-    let mut out = String::with_capacity((w as usize + 1) * (h as usize));
-
-    for row in rgb_data.chunks_exact(w as usize * 3) {
-        for px in row.chunks_exact(3) {
-            let l = luminance_rgb(px[0], px[1], px[2]);
-            out.push(char_for(l, threshold, ascii_chars));
-        }
-        out.push('\n');
-    }
-    Ok((out, w, h, rgb_data))
+    let img = image::open(img_path).with_context(|| format!("opening {}", img_path.display()))?.to_rgb8();
+    Ok(crate::frame::rgb_image_to_ascii_with_colors(img, font_ratio, threshold, columns, ascii_chars))
 }
 
-/// Trailing payload flag bits.
-///
-/// Stored as the first byte of the optional extension area that follows the legacy `8 + w*h*4` block. Each bit announces an optional payload that
-/// follows in a fixed order (lowest bit = earliest payload). Adding a new payload is a forward-compatible change as long as the new bit is appended.
-pub(crate) const CFRAME_EXT_FLAG_HAS_BG: u8 = 0b0000_0001;
+pub(crate) use crate::frame::CFRAME_EXT_FLAG_HAS_BG;
 
 /// Which part of a `.cframe` cell should be erased.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -212,20 +152,7 @@ pub enum CframeEraseLayer {
 /// Older readers that don't know about the extension still parse the body correctly and ignore the trailing bytes. New readers detect the extension
 /// by looking past the legacy body for the `flags` byte instead of inferring payload presence from total file length.
 pub(crate) fn write_cframe_binary(width: u32, height: u32, ascii_content: &str, rgb_data: &[u8], bg_rgb_data: Option<&[u8]>, path: &Path) -> Result<()> {
-    let cell_count = (width * height) as usize;
-    let mut output = Vec::with_capacity(8 + cell_count * 4 + bg_rgb_data.map_or(0, |background| 1 + background.len()));
-    output.extend_from_slice(&width.to_le_bytes());
-    output.extend_from_slice(&height.to_le_bytes());
-
-    for (char_idx, byte) in ascii_content.bytes().filter(|byte| *byte != b'\n').enumerate() {
-        let rgb_offset = char_idx * 3;
-        output.extend_from_slice(&[byte, rgb_data[rgb_offset], rgb_data[rgb_offset + 1], rgb_data[rgb_offset + 2]]);
-    }
-    if let Some(bg_rgb_data) = bg_rgb_data {
-        output.push(CFRAME_EXT_FLAG_HAS_BG);
-        output.extend_from_slice(bg_rgb_data);
-    }
-    fs::write(path, output).with_context(|| format!("writing cframe file {}", path.display()))
+    fs::write(path, crate::frame::encode_cframe(width, height, ascii_content, rgb_data, bg_rgb_data)).with_context(|| format!("writing cframe file {}", path.display()))
 }
 
 fn write_cframe_binary_buffered(width: u32, height: u32, ascii_content: &str, rgb_data: &[u8], bg_rgb_data: Option<&[u8]>, path: &Path) -> Result<()> {
@@ -404,20 +331,6 @@ pub(crate) fn read_txt_to_frame_data(path: &Path) -> Result<AsciiFrameData> {
     Ok(AsciiFrameData {ascii_text, width_chars: width, height_chars: height, rgb_colors: Vec::new(), /* empty = renderer uses white */ bg_rgb_colors: Vec::new()})
 }
 
-fn char_for(luma: u8, threshold: u8, ascii_chars: &[u8]) -> char {
-    if luma < threshold {
-        return ' ';
-    }
-
-    let effective_luma = (luma as u32).saturating_sub(threshold as u32);
-    let range = (255u32).saturating_sub(threshold as u32).max(1);
-    let num_chars_minus_1 = (ascii_chars.len() as u32).saturating_sub(1);
-
-    let idx = (effective_luma * num_chars_minus_1) / range;
-    let idx = idx.min(num_chars_minus_1) as usize;
-
-    ascii_chars[idx] as char
-}
 
 #[derive(Debug, PartialEq, Eq)]
 struct DedupPlan {
