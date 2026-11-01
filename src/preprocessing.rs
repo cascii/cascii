@@ -306,8 +306,9 @@ mod tests {
             return Ok(());
         }
 
-        let input = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/image/input/frame_0001.png");
         let output_dir = temp_test_dir("image");
+        let input = output_dir.join("frame_0001.png");
+        image::RgbImage::from_pixel(16, 16, image::Rgb([255, 255, 255])).save(&input)?;
         let output = output_dir.join("frame_0001_preprocessed.png");
 
         preprocess_image_to_file(&input, find_preprocess_preset("bg-white").unwrap().filter, &output, &FfmpegConfig::default())?;
@@ -324,8 +325,10 @@ mod tests {
             return Ok(());
         }
 
-        let input = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/video/input/test.mkv");
         let output_dir = temp_test_dir("video");
+        let input = output_dir.join("test.mkv");
+        let status = std::process::Command::new("ffmpeg").args(["-v", "error", "-y", "-f", "lavfi", "-i", "color=white:size=16x16:rate=2", "-t", "0.5", "-c:v", "ffv1"]).arg(&input).status()?;
+        assert!(status.success());
         let output = output_dir.join("test_preprocessed.mp4");
 
         preprocess_video_to_file(&input, find_preprocess_preset("bg-white").unwrap().filter, &output, None, None, &FfmpegConfig::default())?;

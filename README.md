@@ -591,3 +591,21 @@ cargo run --example simple_video
 # Acknowledgements
 
 This project is inspired by [developedbyed's video](https://www.youtube.com/watch?v=dUV8pobjZII) that I recommend watching, I reused the logic from his bash script and rewrote it in rust so that it could process faster files with more details. 
+
+## Multiple frame sizes
+
+Generate synchronized column-count variants from one image, image directory or video:
+
+~~~sh
+cascii input.mp4 --columns 55,58,61,67,73,80 --colors --out ./output --default
+cascii input.mp4 --columns 55-73 --colors --out ./output --default
+~~~
+
+Ranges include every integer between the endpoints. Multi-size output defaults to
+legacy frame directories plus an indexed binary asset, sharing one timeline and
+one optional audio track. Use --size-format directory,json,binary,csv or
+--size-format all to select exports. Specifying a format also enables asset
+output for a single width. Existing scalar commands retain their normal layout.
+
+See [MULTISIZE.md](MULTISIZE.md) for the Rust and WASM APIs, format specification,
+resource limits, output paths, playback integration and test commands.

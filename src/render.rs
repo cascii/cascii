@@ -260,8 +260,12 @@ pub(crate) fn fit_image_to_ascii_with_cell_backgrounds(img_path: &Path, font_rat
 }
 
 pub(crate) fn fit_image_to_ascii_with_cell_backgrounds_with_context(img_path: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, background_analysis: &BackgroundAnalysisContext) -> Result<AsciiFrameData> {
+    let img = image::open(img_path).with_context(|| format!("opening {}", img_path.display()))?.to_rgb8();
+    fit_rgb_to_ascii_with_context(img, font_ratio, threshold, bg_threshold, columns, background_analysis)
+}
+
+pub(crate) fn fit_rgb_to_ascii_with_context(mut img: image::RgbImage, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, background_analysis: &BackgroundAnalysisContext) -> Result<AsciiFrameData> {
     let atlas = background_analysis.atlas;
-    let mut img = image::open(img_path).with_context(|| format!("opening {}", img_path.display()))?.to_rgb8();
 
     let (orig_w, orig_h) = img.dimensions();
     let (width_chars, height_chars) = if let Some(cols) = columns {
