@@ -226,7 +226,7 @@ pub(crate) fn read_cframe_to_frame_data(path: &Path) -> Result<AsciiFrameData> {
 
     if width > 0 {
         for row in data[8..8 + expected_body].chunks_exact(width as usize * 4) {
-            for cell in row.chunks_exact(4) {
+            for cell in row.as_chunks::<4>().0 {
                 ascii_text.push(cell[0] as char);
                 rgb_colors.extend_from_slice(&cell[1..4]);
             }

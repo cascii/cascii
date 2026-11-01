@@ -219,7 +219,7 @@ pub(crate) fn render_ascii_frame_into_rgb(frame: &AsciiFrameData, atlas: &GlyphA
             let bg = [frame.bg_rgb_colors[char_idx * 3], frame.bg_rgb_colors[char_idx * 3 + 1], frame.bg_rgb_colors[char_idx * 3 + 2]];
             for py in base_y..y_end {
                 let offset = ((py * pixel_w + base_x) * 3) as usize;
-                for pixel in buffer[offset..offset + cell_cols * 3].chunks_exact_mut(3) {
+                for pixel in buffer[offset..offset + cell_cols * 3].as_chunks_mut::<3>().0 {
                     pixel.copy_from_slice(&bg);
                 }
             }

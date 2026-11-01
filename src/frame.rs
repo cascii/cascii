@@ -99,7 +99,7 @@ pub(crate) fn rgb_image_to_ascii_with_colors(mut img: RgbImage, font_ratio: f32,
     let rgb_data = img.into_raw();
     let mut out = String::with_capacity((w as usize + 1) * (h as usize));
     for row in rgb_data.chunks_exact(w as usize * 3) {
-        for px in row.chunks_exact(3) {
+        for px in row.as_chunks::<3>().0 {
             let l = luminance_rgb(px[0], px[1], px[2]);
             out.push(char_for(l, threshold, ascii_chars));
         }
