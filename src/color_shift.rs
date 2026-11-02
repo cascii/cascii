@@ -41,7 +41,7 @@ pub fn shift_rgb_triplets(rgb: &mut [u8], degrees: f32) -> Result<()> {
         return Err(anyhow!("hue shift must be finite"));
     }
 
-    for color in rgb.chunks_exact_mut(RGB_SIZE) {
+    for color in rgb.as_chunks_mut::<RGB_SIZE>().0 {
         let shifted = shift_rgb([color[0], color[1], color[2]], degrees);
         color.copy_from_slice(&shifted);
     }

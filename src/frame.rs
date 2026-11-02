@@ -41,6 +41,27 @@ pub fn image_bytes_to_frame(bytes: &[u8], options: &ConversionOptions) -> Result
     image_to_frame(&image, options)
 }
 
+/// Decode once and generate every requested size in memory, including on WASM.
+/// This has the same foreground-only capability as image_to_frame.
+pub fn image_bytes_to_frames(bytes: &[u8], options: &ConversionOptions, sizes: &crate::multisize::ColumnSizes) -> Result<Vec<ImageFrame>> {
+    let image = image::load_from_memory(bytes).context("decoding image bytes")?;
+    if options.cell_color_mode != CellColorMode::ForegroundOnly {
+        bail!("in-memory conversion supports only CellColorMode::ForegroundOnly");
+    }
+    if !options.font_ratio.is_finite() || options.font_ratio <= 0.0 || options.ascii_chars.is_empty() || !options.ascii_chars.bytes().all(|byte| (32..=126).contains(&byte)) {
+        bail!("invalid font ratio or printable ASCII ramp");
+    }
+    let rgb = image.to_rgb8();
+    sizes.values().iter().map(|&columns| {
+        let rows = (f64::from(rgb.height()) / f64::from(rgb.width()) * f64::from(columns) * f64::from(options.font_ratio)).round().max(1.0);
+        if rows * f64::from(columns) > crate::multisize::MAX_FRAME_CELLS as f64 {
+            bail!("requested grid is too large");
+        }
+        let (text, width, height, rgb) = rgb_image_to_ascii_with_colors(rgb.clone(), options.font_ratio, options.luminance, Some(columns), options.ascii_chars.as_bytes());
+        Ok(ImageFrame {text, width, height, rgb})
+    }).collect()
+}
+
 /// Convert an already-decoded image into an in-memory ASCII frame.
 ///
 /// Only `CellColorMode::ForegroundOnly` is supported here; the background-fitting modes live in the filesystem pipeline.
@@ -78,7 +99,7 @@ pub(crate) fn rgb_image_to_ascii_with_colors(mut img: RgbImage, font_ratio: f32,
     let rgb_data = img.into_raw();
     let mut out = String::with_capacity((w as usize + 1) * (h as usize));
     for row in rgb_data.chunks_exact(w as usize * 3) {
-        for px in row.chunks_exact(3) {
+        for px in row.as_chunks::<3>().0 {
             let l = luminance_rgb(px[0], px[1], px[2]);
             out.push(char_for(l, threshold, ascii_chars));
         }
@@ -181,6 +202,29 @@ mod tests {
         gradient_image(16, 16).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).expect("png encoding should succeed");
         let frame = image_bytes_to_frame(&png, &options()).expect("conversion should succeed");
         assert_eq!((frame.width, frame.height), (8, 8));
+    }
+
+    #[test]
+    fn multiple_in_memory_sizes_match_independent_conversions() {
+        let image = gradient_image(32, 20);
+        let mut png = Vec::new();
+        image.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        let sizes = "55,58,61,67,73,80".parse::<crate::multisize::ColumnSizes>().unwrap();
+        let frames = image_bytes_to_frames(&png, &options(), &sizes).unwrap();
+        for (frame, &columns) in frames.iter().zip(sizes.values()) {
+            let mut single = options();
+            single.columns = Some(columns);
+            let expected = image_to_frame(&image, &single).unwrap();
+            assert_eq!(frame.width, columns);
+            assert_eq!(frame.text, expected.text);
+            assert_eq!(frame.cframe_bytes(), expected.cframe_bytes());
+        }
+        let mut invalid = options();
+        invalid.font_ratio = f32::NAN;
+        assert!(image_bytes_to_frames(&png, &invalid, &sizes).is_err());
+        invalid = options();
+        invalid.ascii_chars = "é".to_string();
+        assert!(image_bytes_to_frames(&png, &invalid, &sizes).is_err());
     }
 
     #[test]

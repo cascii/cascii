@@ -28,6 +28,19 @@ fn run_ffmpeg_cancellable(mut command: ProcCommand, cancel: Option<&CancelToken>
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn extract_video_frames(input: &Path, out_dir: &Path, columns: u32, fps: u32, start: Option<&str>, end: Option<&str>, preprocess_filter: Option<&str>, ffmpeg_config: &FfmpegConfig, cancel: Option<&CancelToken>) -> Result<()> {
+    let options = VideoOptions {columns, fps, start: start.map(str::to_string), end: end.map(str::to_string), extract_audio: false, preprocess_filter: preprocess_filter.map(str::to_string)};
+    extract_frames_at_width(input, out_dir, Some(columns), &options, ffmpeg_config, cancel)
+}
+
+pub(crate) fn extract_source_frames(input: &Path, out_dir: &Path, options: &VideoOptions, config: &FfmpegConfig, cancel: Option<&CancelToken>) -> Result<()> {
+    extract_frames_at_width(input, out_dir, None, options, config, cancel)
+}
+
+fn extract_frames_at_width(input: &Path, out_dir: &Path, columns: Option<u32>, options: &VideoOptions, ffmpeg_config: &FfmpegConfig, cancel: Option<&CancelToken>) -> Result<()> {
+    let fps = options.fps;
+    let start = options.start.as_deref();
+    let end = options.end.as_deref();
+    let preprocess_filter = options.preprocess_filter.as_deref();
     let out_pattern = out_dir.join("frame_%04d.png");
     let mut ffmpeg_args: Vec<String> = vec!["-loglevel".into(), "error".into()];
 
@@ -63,7 +76,13 @@ pub(crate) fn extract_video_frames(input: &Path, out_dir: &Path, columns: u32, f
         }
     }
 
-    let vf_option = build_frame_extraction_vf(columns, fps, preprocess_filter);
+    let vf_option = match columns {
+        Some(columns) => build_frame_extraction_vf(columns, fps, preprocess_filter),
+        None => match preprocess_filter.map(str::trim).filter(|filter| !filter.is_empty()) {
+            Some(filter) => format!("{},fps={}", filter.trim_end_matches(','), fps),
+            None => format!("fps={}", fps),
+        },
+    };
     ffmpeg_args.push("-vf".into());
     ffmpeg_args.push(vf_option);
     ffmpeg_args.push(out_pattern.to_str().unwrap().to_string());

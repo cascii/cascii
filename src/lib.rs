@@ -103,6 +103,11 @@ pub mod convert;
 #[cfg(feature = "cli")]
 pub mod crop;
 pub mod frame;
+pub mod multisize;
+#[cfg(feature = "cli")]
+mod multisize_io;
+#[cfg(feature = "cli")]
+pub use multisize_io::{MultiSizeFormat, MultiSizeOptions};
 #[cfg(feature = "cli")]
 pub mod loop_detect;
 #[cfg(feature = "cli")]
@@ -114,7 +119,7 @@ pub mod render;
 #[cfg(feature = "cli")]
 pub mod video;
 
-pub use frame::{image_bytes_to_frame, image_to_frame, ImageFrame};
+pub use frame::{image_bytes_to_frame, image_bytes_to_frames, image_to_frame, ImageFrame};
 
 /// A cheap, clonable cancellation flag shared between a running conversion and
 /// the code that wants to stop it.
@@ -954,11 +959,7 @@ impl AsciiConverter {
     pub fn convert_directory(&self, input_dir: &Path, output_dir: &Path, options: &ConversionOptions, keep_images: bool) -> Result<usize> {
         fs::create_dir_all(output_dir)?;
         let ascii_chars = options.ascii_chars.as_bytes();
-        if options.cell_color_mode == CellColorMode::FitForegroundBackgroundOptimized {
-            convert::convert_directory_parallel_optimized_with_progress(input_dir, output_dir, options.font_ratio, options.luminance, options.resolve_bg_threshold(), options.columns.unwrap_or(400), keep_images, ascii_chars, &options.output_mode, options.bg_fit_quality, None::<fn(usize, usize)>, self.cancel_token.as_ref())
-        } else {
-            convert::convert_directory_parallel(input_dir, output_dir, options.font_ratio, options.luminance, options.resolve_bg_threshold(), keep_images, ascii_chars, &options.output_mode, options.cell_color_mode, options.bg_fit_quality, self.cancel_token.as_ref())
-        }
+        convert::convert_directory_parallel_with_progress_at_columns(input_dir, output_dir, options.font_ratio, options.luminance, options.resolve_bg_threshold(), options.columns, keep_images, ascii_chars, &options.output_mode, options.cell_color_mode, options.bg_fit_quality, None::<fn(usize, usize)>, self.cancel_token.as_ref())
     }
 
     /// Convert a directory of images to ASCII frames with detailed progress reporting
@@ -994,7 +995,7 @@ impl AsciiConverter {
     pub fn convert_directory_with_progress<F: Fn(Progress) + Send + Sync>(&self, input_dir: &Path, output_dir: &Path, options: &ConversionOptions, keep_images: bool, progress_callback: F) -> Result<usize> {
         fs::create_dir_all(output_dir)?;
         let ascii_chars = options.ascii_chars.as_bytes();
-        convert::convert_directory_parallel_with_detailed_progress(input_dir, output_dir, options.font_ratio, options.luminance, options.resolve_bg_threshold(), keep_images, ascii_chars, &options.output_mode, options.cell_color_mode, options.bg_fit_quality, &progress_callback, self.cancel_token.as_ref())
+        convert::convert_directory_parallel_with_detailed_progress_at_columns(input_dir, output_dir, options.font_ratio, options.luminance, options.resolve_bg_threshold(), options.columns, keep_images, ascii_chars, &options.output_mode, options.cell_color_mode, options.bg_fit_quality, &progress_callback, self.cancel_token.as_ref())
     }
 
     /// Get a preset by name

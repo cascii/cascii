@@ -28,6 +28,17 @@ pub(crate) enum BackgroundAnalysisContext {
     Optimized(background_fit_optimized::OptimizedBackgroundAnalysisContext),
 }
 
+pub(crate) fn decoded_image_to_frame(image: &image::RgbImage, options: &crate::ConversionOptions, columns: u32, analysis: Option<&BackgroundAnalysisContext>) -> Result<AsciiFrameData> {
+    match analysis {
+        None => {
+            let (ascii_text, width_chars, height_chars, rgb_colors) = crate::frame::rgb_image_to_ascii_with_colors(image.clone(), options.font_ratio, options.luminance, Some(columns), options.ascii_chars.as_bytes());
+            Ok(AsciiFrameData {ascii_text, width_chars, height_chars, rgb_colors, bg_rgb_colors: Vec::new()})
+        }
+        Some(BackgroundAnalysisContext::Legacy(context)) => render::fit_rgb_to_ascii_with_context(image.clone(), options.font_ratio, options.luminance, options.resolve_bg_threshold(), Some(columns), context),
+        Some(BackgroundAnalysisContext::Optimized(context)) => background_fit_optimized::fit_rgb_to_ascii_with_context(image.clone(), options.font_ratio, options.luminance, options.resolve_bg_threshold(), Some(columns), context),
+    }
+}
+
 pub(crate) fn background_analysis_for_mode(ascii_chars: &[u8], cell_color_mode: CellColorMode, bg_fit_quality: BgFitQuality) -> Result<Option<BackgroundAnalysisContext>> {
     match cell_color_mode {
         CellColorMode::ForegroundOnly => Ok(None),
@@ -215,7 +226,7 @@ pub(crate) fn read_cframe_to_frame_data(path: &Path) -> Result<AsciiFrameData> {
 
     if width > 0 {
         for row in data[8..8 + expected_body].chunks_exact(width as usize * 4) {
-            for cell in row.chunks_exact(4) {
+            for cell in row.as_chunks::<4>().0 {
                 ascii_text.push(cell[0] as char);
                 rgb_colors.extend_from_slice(&cell[1..4]);
             }
@@ -405,6 +416,7 @@ fn copy_duplicate_outputs(dst_dir: &Path, pngs: &[PathBuf], duplicate_idx: usize
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 pub(crate) fn convert_directory_parallel(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, bg_fit_quality: BgFitQuality, cancel: Option<&CancelToken>) -> Result<usize> {
     convert_directory_parallel_with_progress(src_dir, dst_dir, font_ratio, threshold, bg_threshold, keep_images, ascii_chars, output_mode, cell_color_mode, bg_fit_quality, None::<fn(usize, usize)>, cancel)
 }
@@ -421,7 +433,7 @@ pub(crate) fn convert_directory_parallel_optimized_with_progress<F: Fn(usize, us
 }
 
 #[allow(clippy::too_many_arguments)]
-fn convert_directory_parallel_with_progress_at_columns<F: Fn(usize, usize) + Send + Sync>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, bg_fit_quality: BgFitQuality, progress_callback: Option<F>, cancel: Option<&CancelToken>) -> Result<usize> {
+pub(crate) fn convert_directory_parallel_with_progress_at_columns<F: Fn(usize, usize) + Send + Sync>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, bg_fit_quality: BgFitQuality, progress_callback: Option<F>, cancel: Option<&CancelToken>) -> Result<usize> {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -466,7 +478,9 @@ fn convert_directory_parallel_with_progress_at_columns<F: Fn(usize, usize) + Sen
         Ok(())
     })?;
 
-    if !keep_images {
+    // Only the in-place extraction directory owns disposable intermediates.
+    // A separate input directory contains caller-owned original images.
+    if !keep_images && fs::canonicalize(src_dir)? == fs::canonicalize(dst_dir)? {
         for img_path in &pngs {
             fs::remove_file(img_path)?;
         }
@@ -488,7 +502,7 @@ pub(crate) fn convert_directory_parallel_optimized_with_detailed_progress<F: Fn(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn convert_directory_parallel_with_detailed_progress_at_columns<F: Fn(Progress) + Send + Sync>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, bg_fit_quality: BgFitQuality, progress_callback: &F, cancel: Option<&CancelToken>) -> Result<usize> {
+pub(crate) fn convert_directory_parallel_with_detailed_progress_at_columns<F: Fn(Progress) + Send + Sync>(src_dir: &Path, dst_dir: &Path, font_ratio: f32, threshold: u8, bg_threshold: u8, columns: Option<u32>, keep_images: bool, ascii_chars: &[u8], output_mode: &OutputMode, cell_color_mode: CellColorMode, bg_fit_quality: BgFitQuality, progress_callback: &F, cancel: Option<&CancelToken>) -> Result<usize> {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -546,7 +560,9 @@ fn convert_directory_parallel_with_detailed_progress_at_columns<F: Fn(Progress) 
         Ok(())
     })?;
 
-    if !keep_images {
+    // Only the in-place extraction directory owns disposable intermediates.
+    // A separate input directory contains caller-owned original images.
+    if !keep_images && fs::canonicalize(src_dir)? == fs::canonicalize(dst_dir)? {
         for img_path in &pngs {
             fs::remove_file(img_path)?;
         }

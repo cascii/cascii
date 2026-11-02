@@ -1,7 +1,8 @@
 use anyhow::{anyhow, Context, Result};
 use cascii::loop_detect::{run_find_loop_with_options, LoopDetectionOptions, LoopMatchMode};
 use cascii::preprocessing::{detect_preprocess_input_kind, preprocess_directory, preprocess_image_to_file, preprocess_image_to_temp, preprocess_video_to_file, resolve_preprocess_filter, resolve_preprocess_output_path, PreprocessInputKind, PREPROCESS_PRESETS};
-use cascii::{crop_frames, run_trim, AppConfig, AsciiConverter, BgFitQuality, CellColorMode, ConversionOptions, OutputMode, Progress, ProgressPhase, ToVideoOptions, VideoOptions};
+use cascii::{crop_frames, run_trim, AppConfig, AsciiConverter, BgFitQuality, CellColorMode, ConversionOptions, MultiSizeFormat, MultiSizeOptions, OutputMode, Progress, ProgressPhase, ToVideoOptions, VideoOptions};
+use cascii::multisize::ColumnSizes;
 use clap::{Parser, Subcommand, ValueEnum};
 use dialoguer::{Confirm, FuzzySelect, Input};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -51,6 +52,9 @@ enum LoopModeArg {
     VisualTextAndColor,
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum SizeFormatArg { Directory, Json, Binary, Csv, All }
+
 impl From<LoopModeArg> for LoopMatchMode {
     fn from(value: LoopModeArg) -> Self {
         match value {
@@ -73,9 +77,17 @@ struct Args {
     /// Output directory for the generated files
     out: Option<PathBuf>,
 
-    /// Target columns for scaling (width)
+    /// Named output directory (the legacy positional output is also accepted)
+    #[arg(short = 'o', long = "out", conflicts_with = "out")]
+    out_option: Option<PathBuf>,
+
+    /// Column count, comma-separated sizes, or an inclusive range (55-73)
     #[arg(long)]
-    columns: Option<u32>,
+    columns: Option<ColumnSizes>,
+
+    /// Multi-size export formats; also enables asset output for a single size
+    #[arg(long, value_enum, value_delimiter = ',')]
+    size_format: Vec<SizeFormatArg>,
 
     /// Frames per second when extracting from video
     #[arg(long)]
@@ -236,6 +248,7 @@ fn print_preprocess_presets() {
 
 fn main() -> Result<()> {
     let mut args = Args::parse();
+    args.out = args.out_option.take().or(args.out);
     let is_interactive = !(args.default || args.small || args.large);
 
     // Handle subcommands early
@@ -344,7 +357,7 @@ fn main() -> Result<()> {
             return Ok(());
         }
 
-        if input_path.is_dir() {
+        if input_path.is_dir() && args.columns.as_ref().is_none_or(|sizes| sizes.values().len() == 1) && args.size_format.is_empty() {
             return Err(anyhow!("Preprocessing a directory requires --preprocess-output to specify where preprocessed images are written"));
         }
     }
@@ -396,7 +409,7 @@ fn main() -> Result<()> {
 
     if is_interactive {
         if args.columns.is_none() {
-            args.columns = Some(Input::new().with_prompt("Columns (width)").default(default_cols).interact()?);
+            args.columns = Some(Input::<String>::new().with_prompt("Columns (73, 55,58,73, or 55-73)").default(default_cols.to_string()).interact()?.parse()?);
         }
 
         if args.font_ratio.is_none() {
@@ -421,13 +434,18 @@ fn main() -> Result<()> {
         }
     }
 
-    let columns = args.columns.unwrap_or(default_cols);
+    let sizes = args.columns.clone().unwrap_or(ColumnSizes::new(vec![default_cols])?);
+    let multi_size = sizes.values().len() > 1 || !args.size_format.is_empty();
+    let columns = sizes.largest();
+    if multi_size && args.to_video {
+        return Err(anyhow!("multi-size assets require frame output; render an individual variants/<columns> directory with --to-video"));
+    }
     let fps = args.fps.unwrap_or(default_fps);
     let font_ratio = args.font_ratio.unwrap_or(default_ratio);
     let luminance = args.luminance.unwrap_or(active.luminance);
 
     // --- Execution ---
-    if !args.to_video {
+    if !args.to_video && !multi_size {
         fs::create_dir_all(&output_path).context("creating output dir")?;
 
         // Check if output directory already contains frames.
@@ -480,6 +498,30 @@ fn main() -> Result<()> {
 
     // Create conversion options
     let conv_opts = ConversionOptions {columns: Some(columns), font_ratio, luminance, bg_luminance: args.bg_luminance, ascii_chars: cfg.ascii_chars.clone(), output_mode: output_mode.clone(), cell_color_mode, bg_fit_quality};
+
+    if multi_size {
+        println!("Generating {} sizes: approximately {:.1}x raw cell payload compared with one {}-column rendition", sizes.values().len(), sizes.relative_cell_count(columns)?, columns);
+        let formats = if args.size_format.is_empty() {
+            vec![MultiSizeFormat::Directory, MultiSizeFormat::Binary]
+        } else {
+            args.size_format.iter().flat_map(|format| match format {
+                SizeFormatArg::Directory => vec![MultiSizeFormat::Directory],
+                SizeFormatArg::Json => vec![MultiSizeFormat::Json],
+                SizeFormatArg::Binary => vec![MultiSizeFormat::Binary],
+                SizeFormatArg::Csv => vec![MultiSizeFormat::Csv],
+                SizeFormatArg::All => vec![MultiSizeFormat::Directory, MultiSizeFormat::Json, MultiSizeFormat::Binary, MultiSizeFormat::Csv],
+            }).collect()
+        };
+        let work = MultiSizeOptions {
+            sizes, conversion: conv_opts, formats, keep_images: args.keep_images,
+            video: VideoOptions {fps, start: args.start.clone(), end: args.end.clone(), columns, extract_audio: args.audio, preprocess_filter: preprocess_filter.clone()},
+        };
+        let manifest = converter.convert_multi_size(input_path, &output_path, &work, |completed, total| {
+            if completed == total {println!("Generated {completed} frame variants");}
+        })?;
+        println!("{} synchronized frames at {:?} columns saved to {}", manifest.frame_count, work.sizes.values(), output_path.display());
+        return Ok(());
+    }
 
     if input_path.is_file() {
         if is_image_input {

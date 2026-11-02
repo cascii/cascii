@@ -83,7 +83,11 @@ pub(crate) fn fit_image_to_ascii_with_cell_backgrounds(image_path: &Path, font_r
 }
 
 pub(crate) fn fit_image_to_ascii_with_cell_backgrounds_with_context(image_path: &Path, font_ratio: f32, threshold: u8, background_threshold: u8, columns: Option<u32>, context: &OptimizedBackgroundAnalysisContext) -> Result<AsciiFrameData> {
-    let mut image = image::open(image_path).with_context(|| format!("opening {}", image_path.display()))?.to_rgb8();
+    let image = image::open(image_path).with_context(|| format!("opening {}", image_path.display()))?.to_rgb8();
+    fit_rgb_to_ascii_with_context(image, font_ratio, threshold, background_threshold, columns, context)
+}
+
+pub(crate) fn fit_rgb_to_ascii_with_context(mut image: image::RgbImage, font_ratio: f32, threshold: u8, background_threshold: u8, columns: Option<u32>, context: &OptimizedBackgroundAnalysisContext) -> Result<AsciiFrameData> {
     let (original_width, original_height) = image.dimensions();
     let (width_chars, height_chars) = if let Some(columns) = columns {
         let rows = (original_height as f32 / original_width as f32 * columns as f32 * font_ratio).round() as u32;
