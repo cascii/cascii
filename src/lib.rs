@@ -96,6 +96,8 @@ use walkdir::WalkDir;
 
 #[cfg(feature = "cli")]
 mod background_fit_optimized;
+#[cfg(all(feature = "metal", target_os = "macos"))]
+mod background_fit_metal;
 pub mod cell_filter;
 pub mod color_shift;
 #[cfg(feature = "cli")]
@@ -443,6 +445,9 @@ pub enum CellColorMode {
     FitForegroundBackground,
     /// Optimized foreground/background fitter with a small atlas and candidate shortlist.
     FitForegroundBackgroundOptimized,
+    /// Experimental macOS Metal fitter. Uses single precision with CPU correction
+    /// near numerical ties; tiny differences remain possible. Requires `metal`.
+    FitForegroundBackgroundMetal,
 }
 
 impl CellColorMode {
@@ -455,6 +460,7 @@ impl CellColorMode {
             Self::ForegroundOnly => "off",
             Self::FitForegroundBackground => "legacy",
             Self::FitForegroundBackgroundOptimized => "optimized",
+            Self::FitForegroundBackgroundMetal => "metal-f32",
         }
     }
 }

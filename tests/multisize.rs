@@ -257,3 +257,17 @@ fn video_is_sampled_once_with_shared_audio_and_consistent_variant_timing() {
     }
     assert_eq!(fs::read(input).unwrap(), original);
 }
+
+#[test]
+fn schema_two_map_roundtrips_and_rejects_invalid_selections() {
+    use cascii::multisize::{MultiSizeArchive,write_archive};
+    let bytes=include_bytes!("fixtures/multisize-v2.bin");
+    let asset=MultiSizeArchive::parse(bytes).unwrap();
+    assert_eq!(asset.manifest.column_map,Some(vec![2,3,2,3]));
+    let mut buffer=std::io::Cursor::new(Vec::new());
+    write_archive(&mut buffer,&asset.manifest,|columns,index|asset.frame(columns,index)).unwrap();
+    assert_eq!(MultiSizeArchive::parse(&buffer.into_inner()).unwrap().manifest,asset.manifest);
+    let mut invalid=asset.manifest.clone();invalid.column_map=Some(vec![2]);assert!(invalid.validate().is_err());
+    invalid.column_map=Some(vec![2,3,9,3]);assert!(invalid.validate().is_err());
+    invalid.column_map=Some(vec![2,3,2,3]);invalid.schema_version=1;assert!(invalid.validate().is_err());
+}

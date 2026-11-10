@@ -6,7 +6,7 @@ fn main() -> anyhow::Result<()> {
     let output = PathBuf::from(std::env::args().nth(1).expect("pass fixture output directory"));
     fs::create_dir_all(&output)?;
     let manifest = MultiSizeManifest {
-        format: "cascii-multisize".into(), schema_version: 1, frame_count: 4, fps: 24, default_columns: 3,
+        format: "cascii-multisize".into(), schema_version: 1, frame_count: 4, fps: 24, default_columns: 3, column_map: None,
         font_ratio: 0.7, luminance: 20, ascii_chars: " .,#\"".into(), text: true, color: true, audio: None,
         outputs: vec!["variants/".into(), "frames.bin".into(), "frames.json".into(), "frames.csv".into()],
         variants: vec![SizeVariant {columns: 2, rows: vec![2; 4]}, SizeVariant {columns: 3, rows: vec![2; 4]}],
@@ -31,7 +31,7 @@ fn main() -> anyhow::Result<()> {
             StoredFrame {text, cframe: Some(bytes)}
         }).collect(),
     }).collect();
-    let asset = MultiSizeJson {manifest, variants};
+    let mut asset = MultiSizeJson {manifest, variants};
     asset.validate()?;
     let mut buffer = Cursor::new(Vec::new());
     write_archive(&mut buffer, &asset.manifest, |columns, frame| {
@@ -46,5 +46,11 @@ fn main() -> anyhow::Result<()> {
         }
     }
     fs::write(output.join("multisize.csv"), csv)?;
+    asset.manifest.schema_version=2;
+    asset.manifest.column_map=Some(vec![2,3,2,3]);
+    let mut buffer=Cursor::new(Vec::new());
+    write_archive(&mut buffer,&asset.manifest,|columns,index| Ok(asset.variants.iter().find(|v|v.columns==columns).unwrap().frames[index as usize].clone()))?;
+    fs::write(output.join("multisize-v2.bin"),buffer.into_inner())?;
+    fs::write(output.join("multisize-v2.json"),serde_json::to_vec_pretty(&asset)?)?;
     Ok(())
 }
