@@ -1,0 +1,122 @@
+{
+  "stream_cpu_small": {
+    "byte_identical_frames": 120,
+    "frames": 120,
+    "sampled_indices": [
+      0,
+      29,
+      59,
+      89,
+      119
+    ],
+    "sampled_cells": 316000,
+    "char_mismatch_pct": 0.0,
+    "rgb_mae": 0.0,
+    "rgb_max_abs": 0
+  },
+  "stream_gpu_small": {
+    "byte_identical_frames": 0,
+    "frames": 120,
+    "sampled_indices": [
+      0,
+      29,
+      59,
+      89,
+      119
+    ],
+    "sampled_cells": 316000,
+    "char_mismatch_pct": 0.0012658227848101266,
+    "rgb_mae": 3.5864978902953584e-05,
+    "rgb_max_abs": 1
+  },
+  "stream_cpu_full": {
+    "byte_identical_frames": 0,
+    "frames": 120,
+    "sampled_indices": [
+      0,
+      29,
+      59,
+      89,
+      119
+    ],
+    "sampled_cells": 316000,
+    "char_mismatch_pct": 8.175949367088608,
+    "rgb_mae": 2.1352879746835445,
+    "rgb_max_abs": 114
+  },
+  "stream_gpu_full": {
+    "byte_identical_frames": 0,
+    "frames": 120,
+    "sampled_indices": [
+      0,
+      29,
+      59,
+      89,
+      119
+    ],
+    "sampled_cells": 316000,
+    "char_mismatch_pct": 8.17626582278481,
+    "rgb_mae": 2.1352911392405063,
+    "rgb_max_abs": 114
+  },
+  "cuda_scale_cpu": {
+    "byte_identical_frames": 0,
+    "frames": 120,
+    "sampled_indices": [
+      0,
+      29,
+      59,
+      89,
+      119
+    ],
+    "sampled_cells": 316000,
+    "char_mismatch_pct": 10.225949367088608,
+    "rgb_mae": 2.567833333333333,
+    "rgb_max_abs": 215
+  },
+  "cuda_scale_gpu": {
+    "byte_identical_frames": 0,
+    "frames": 120,
+    "sampled_indices": [
+      0,
+      29,
+      59,
+      89,
+      119
+    ],
+    "sampled_cells": 316000,
+    "char_mismatch_pct": 10.22626582278481,
+    "rgb_mae": 2.567835443037975,
+    "rgb_max_abs": 215
+  },
+  "full_cpu_vs_full_gpu": {
+    "byte_identical_frames": 0,
+    "frames": 120,
+    "sampled_indices": [
+      0,
+      29,
+      59,
+      89,
+      119
+    ],
+    "sampled_cells": 316000,
+    "char_mismatch_pct": 0.0012658227848101266,
+    "rgb_mae": 6.645569620253165e-05,
+    "rgb_max_abs": 1
+  },
+  "cuda_cpu_vs_cuda_gpu": {
+    "byte_identical_frames": 12,
+    "frames": 120,
+    "sampled_indices": [
+      0,
+      29,
+      59,
+      89,
+      119
+    ],
+    "sampled_cells": 316000,
+    "char_mismatch_pct": 0.000949367088607595,
+    "rgb_mae": 2.320675105485232e-05,
+    "rgb_max_abs": 1
+  }
+}

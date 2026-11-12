@@ -1,0 +1,37 @@
+[
+  {
+    "path": "resources\\source.png",
+    "bytes": 10989392,
+    "sha256": "9ee64bfd5eb3c4afe33f193aa5bdaca80b0789234dd7a7fbfd7d822160b46657"
+  },
+  {
+    "path": "resources\\test_01.png",
+    "bytes": 1403861,
+    "sha256": "02210dcffe8f0cef8fb3d0b2f9d2ff5515414d546c792b29c49e7095fa0c2b64"
+  },
+  {
+    "path": "resources\\test_02.png",
+    "bytes": 975934,
+    "sha256": "412083929ec5dfe81ca478ecb0c77247b3a3d6ca971df1832561341aa9054597"
+  },
+  {
+    "path": "resources\\test_03.png",
+    "bytes": 783231,
+    "sha256": "9528c9543fd99f1b7715dab83d810b139460b3357e83f85aeb61ed2bcd99eaad"
+  },
+  {
+    "path": "resources\\test_04.png",
+    "bytes": 1571277,
+    "sha256": "5cd74b0429dac258ef6a11702068fa5259f86312bd3d5e9f7a1afd44939146ca"
+  },
+  {
+    "path": "research\\fixtures\\motion_1080p.mp4",
+    "bytes": 4956895,
+    "sha256": "3bf4d9bb7bc764dd2956c3db9a224de927338f1c347f27235d9602c2b6f9148f"
+  },
+  {
+    "path": "research\\fixtures\\motion_4k.mp4",
+    "bytes": 18487483,
+    "sha256": "265fdac09817641780768ec5b781a5c08f3e0eeec9311952a9aba8a0ec55701b"
+  }
+]

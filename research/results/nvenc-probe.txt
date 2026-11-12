@@ -1,0 +1,26 @@
+ffmpeg : Input #0, lavfi, from 'color=size=320x240:rate=30':
+At line:2 char:802
++ ... a-help.txt; ffmpeg -hide_banner -f lavfi -i color=size=320x240:rate=3 ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Input #0, lavfi...0x240:rate=30'::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: wrapped_avframe, yuv420p, 320x240 [SAR 1:1 DAR 4:3], 30 fps, 30 tbr, 30 tbn
+Stream mapping:
+  Stream #0:0 -> #0:0 (wrapped_avframe (native) -> h264 (h264_nvenc))
+Press [q] to stop, [?] for help
+[h264_nvenc @ 00000246c72c2200] Driver does not support the required nvenc API version. Required: 13.0 Found: 12.2
+[h264_nvenc @ 00000246c72c2200] The minimum required Nvidia driver for nvenc is 570.0 or newer
+[vost#0:0/h264_nvenc @ 00000246c72c0e40] [enc:h264_nvenc @ 00000246c72589c0] Error while opening encoder - maybe 
+incorrect parameters such as bit_rate, rate, width or height.
+[vf#0:0 @ 00000246c72dd0c0] Error sending frames to consumers: Function not implemented
+[vf#0:0 @ 00000246c72dd0c0] Task finished with error code: -40 (Function not implemented)
+[vf#0:0 @ 00000246c72dd0c0] Terminating thread with return code -40 (Function not implemented)
+[vost#0:0/h264_nvenc @ 00000246c72c0e40] [enc:h264_nvenc @ 00000246c72589c0] Could not open encoder before EOF
+[vost#0:0/h264_nvenc @ 00000246c72c0e40] Task finished with error code: -22 (Invalid argument)
+[vost#0:0/h264_nvenc @ 00000246c72c0e40] Terminating thread with return code -22 (Invalid argument)
+[out#0/null @ 00000246c7295ac0] Nothing was written into output file, because at least one of its streams received no 
+packets.
+frame=    0 fps=0.0 q=0.0 Lsize=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:00.00    
+Conversion failed!

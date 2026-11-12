@@ -1,0 +1,1586 @@
+[
+  {
+    "clip": "1080p",
+    "mode": "baseline",
+    "rep": 0,
+    "warmup": true,
+    "wall_ms": 582.0016000000123,
+    "detail": {},
+    "command": [
+      "D:\\Desktop\\cascii\\target\\release\\cascii.exe",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "--out",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_baseline_0",
+      "--default",
+      "--columns",
+      "400",
+      "--fps",
+      "30",
+      "--font-ratio",
+      "0.7",
+      "--luminance",
+      "20",
+      "--color-only"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "stream_gpu_full",
+    "rep": 0,
+    "warmup": true,
+    "wall_ms": 1121.9978999999967,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 223.96889999999996,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": false,
+      "setup_ms": 133.0618,
+      "total_ms": 1039.5639,
+      "write_ms": 307.3826
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cpu",
+      "0",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_stream_gpu_full_0"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "cuda_scale_gpu",
+    "rep": 0,
+    "warmup": true,
+    "wall_ms": 819.1011000000117,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 56.013999999999996,
+      "frames": 120,
+      "hwdecode": true,
+      "prescale": true,
+      "setup_ms": 123.03540000000001,
+      "total_ms": 728.7678,
+      "write_ms": 209.08779999999993
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cuda",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_cuda_scale_gpu_0"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "stream_cpu_full",
+    "rep": 0,
+    "warmup": true,
+    "wall_ms": 2818.475700000022,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 2225.4252,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": false,
+      "setup_ms": 0.0022,
+      "total_ms": 2748.4664,
+      "write_ms": 183.39820000000003
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cpu",
+      "0",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_stream_cpu_full_0"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "stream_cpu_small",
+    "rep": 0,
+    "warmup": true,
+    "wall_ms": 1049.421099999904,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 647.5235999999999,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": true,
+      "setup_ms": 0.0038,
+      "total_ms": 969.4656,
+      "write_ms": 188.59
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cpu",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_stream_cpu_small_0"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "cuda_scale_cpu",
+    "rep": 0,
+    "warmup": true,
+    "wall_ms": 1224.8833999999533,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 551.9904,
+      "frames": 120,
+      "hwdecode": true,
+      "prescale": true,
+      "setup_ms": 0.0043,
+      "total_ms": 1150.1707,
+      "write_ms": 268.06469999999996
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cuda",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_cuda_scale_cpu_0"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "stream_gpu_small",
+    "rep": 0,
+    "warmup": true,
+    "wall_ms": 868.6646999999539,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 61.077,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": true,
+      "setup_ms": 139.4329,
+      "total_ms": 787.3649,
+      "write_ms": 449.0461000000001
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cpu",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_stream_gpu_small_0"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "baseline",
+    "rep": 1,
+    "warmup": false,
+    "wall_ms": 653.1933999999637,
+    "detail": {},
+    "command": [
+      "D:\\Desktop\\cascii\\target\\release\\cascii.exe",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "--out",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_baseline_1",
+      "--default",
+      "--columns",
+      "400",
+      "--fps",
+      "30",
+      "--font-ratio",
+      "0.7",
+      "--luminance",
+      "20",
+      "--color-only"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "stream_gpu_full",
+    "rep": 1,
+    "warmup": false,
+    "wall_ms": 1058.8637000000745,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 239.872,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": false,
+      "setup_ms": 126.50520000000002,
+      "total_ms": 979.5779,
+      "write_ms": 248.00159999999988
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cpu",
+      "0",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_stream_gpu_full_1"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "cuda_scale_gpu",
+    "rep": 1,
+    "warmup": false,
+    "wall_ms": 857.5627000000168,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 60.991800000000005,
+      "frames": 120,
+      "hwdecode": true,
+      "prescale": true,
+      "setup_ms": 127.1815,
+      "total_ms": 765.5001,
+      "write_ms": 300.14080000000007
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cuda",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_cuda_scale_gpu_1"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "stream_cpu_small",
+    "rep": 1,
+    "warmup": false,
+    "wall_ms": 1091.1256000000549,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 561.7316000000003,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": true,
+      "setup_ms": 0.0036,
+      "total_ms": 1012.3584000000001,
+      "write_ms": 317.67500000000024
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cpu",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_stream_cpu_small_1"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "cuda_scale_cpu",
+    "rep": 1,
+    "warmup": false,
+    "wall_ms": 1246.241800000007,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 545.6610999999999,
+      "frames": 120,
+      "hwdecode": true,
+      "prescale": true,
+      "setup_ms": 0.0034000000000000002,
+      "total_ms": 1182.1608999999999,
+      "write_ms": 331.4981
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cuda",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_cuda_scale_cpu_1"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "stream_gpu_small",
+    "rep": 1,
+    "warmup": false,
+    "wall_ms": 1111.6391000000476,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 57.47990000000004,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": true,
+      "setup_ms": 130.1234,
+      "total_ms": 1020.5506,
+      "write_ms": 697.6145999999999
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cpu",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_stream_gpu_small_1"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "stream_cpu_full",
+    "rep": 1,
+    "warmup": false,
+    "wall_ms": 2791.9160000000147,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 2228.3264,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": false,
+      "setup_ms": 0.0018,
+      "total_ms": 2722.3362,
+      "write_ms": 145.27919999999992
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cpu",
+      "0",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_stream_cpu_full_1"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "cuda_scale_cpu",
+    "rep": 2,
+    "warmup": false,
+    "wall_ms": 945.1503999999886,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 533.3833,
+      "frames": 120,
+      "hwdecode": true,
+      "prescale": true,
+      "setup_ms": 0.0038,
+      "total_ms": 876.8178,
+      "write_ms": 38.819800000000015
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cuda",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_cuda_scale_cpu_2"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "baseline",
+    "rep": 2,
+    "warmup": false,
+    "wall_ms": 522.3786000000246,
+    "detail": {},
+    "command": [
+      "D:\\Desktop\\cascii\\target\\release\\cascii.exe",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "--out",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_baseline_2",
+      "--default",
+      "--columns",
+      "400",
+      "--fps",
+      "30",
+      "--font-ratio",
+      "0.7",
+      "--luminance",
+      "20",
+      "--color-only"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "stream_gpu_small",
+    "rep": 2,
+    "warmup": false,
+    "wall_ms": 496.4693999999099,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 60.06449999999996,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": true,
+      "setup_ms": 131.5009,
+      "total_ms": 417.065,
+      "write_ms": 81.16550000000001
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cpu",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_stream_gpu_small_2"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "stream_cpu_full",
+    "rep": 2,
+    "warmup": false,
+    "wall_ms": 2672.1529999999802,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 2216.071200000001,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": false,
+      "setup_ms": 0.0015999999999999999,
+      "total_ms": 2599.202,
+      "write_ms": 43.17079999999999
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cpu",
+      "0",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_stream_cpu_full_2"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "cuda_scale_gpu",
+    "rep": 2,
+    "warmup": false,
+    "wall_ms": 667.7831999999171,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 53.20889999999998,
+      "frames": 120,
+      "hwdecode": true,
+      "prescale": true,
+      "setup_ms": 129.5172,
+      "total_ms": 588.9656,
+      "write_ms": 52.51629999999999
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cuda",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_cuda_scale_gpu_2"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "stream_gpu_full",
+    "rep": 2,
+    "warmup": false,
+    "wall_ms": 861.3540000000057,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 250.9663000000001,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": false,
+      "setup_ms": 125.3986,
+      "total_ms": 780.5088,
+      "write_ms": 59.33280000000003
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cpu",
+      "0",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_stream_gpu_full_2"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "stream_cpu_small",
+    "rep": 2,
+    "warmup": false,
+    "wall_ms": 1061.9583999999804,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 565.5297,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": true,
+      "setup_ms": 0.0033,
+      "total_ms": 979.9852,
+      "write_ms": 289.78200000000004
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cpu",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_stream_cpu_small_2"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "stream_gpu_full",
+    "rep": 3,
+    "warmup": false,
+    "wall_ms": 1005.5692999999337,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 229.51419999999985,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": false,
+      "setup_ms": 128.9502,
+      "total_ms": 926.6877,
+      "write_ms": 204.27929999999995
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cpu",
+      "0",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_stream_gpu_full_3"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "cuda_scale_cpu",
+    "rep": 3,
+    "warmup": false,
+    "wall_ms": 917.3388000000386,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 534.9684,
+      "frames": 120,
+      "hwdecode": true,
+      "prescale": true,
+      "setup_ms": 0.0033,
+      "total_ms": 854.8443,
+      "write_ms": 37.283100000000005
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cuda",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_cuda_scale_cpu_3"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "stream_cpu_full",
+    "rep": 3,
+    "warmup": false,
+    "wall_ms": 2825.240200000053,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 2350.5185000000006,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": false,
+      "setup_ms": 0.0018,
+      "total_ms": 2759.8476,
+      "write_ms": 56.011199999999995
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cpu",
+      "0",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_stream_cpu_full_3"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "stream_gpu_small",
+    "rep": 3,
+    "warmup": false,
+    "wall_ms": 560.2511999999251,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 67.2096,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": true,
+      "setup_ms": 136.05610000000001,
+      "total_ms": 472.0538,
+      "write_ms": 118.69350000000004
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cpu",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_stream_gpu_small_3"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "cuda_scale_gpu",
+    "rep": 3,
+    "warmup": false,
+    "wall_ms": 705.8455000000095,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 63.383899999999976,
+      "frames": 120,
+      "hwdecode": true,
+      "prescale": true,
+      "setup_ms": 131.9669,
+      "total_ms": 626.3421,
+      "write_ms": 89.3214
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cuda",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_cuda_scale_gpu_3"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "baseline",
+    "rep": 3,
+    "warmup": false,
+    "wall_ms": 517.0369999999593,
+    "detail": {},
+    "command": [
+      "D:\\Desktop\\cascii\\target\\release\\cascii.exe",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "--out",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_baseline_3",
+      "--default",
+      "--columns",
+      "400",
+      "--fps",
+      "30",
+      "--font-ratio",
+      "0.7",
+      "--luminance",
+      "20",
+      "--color-only"
+    ]
+  },
+  {
+    "clip": "1080p",
+    "mode": "stream_cpu_small",
+    "rep": 3,
+    "warmup": false,
+    "wall_ms": 822.4248999999872,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 580.6984999999999,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": true,
+      "setup_ms": 0.0035,
+      "total_ms": 752.9626000000001,
+      "write_ms": 48.55070000000001
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_1080p.mp4",
+      "1920",
+      "1080",
+      "400",
+      "cpu",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\1080p_stream_cpu_small_3"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "baseline",
+    "rep": 0,
+    "warmup": true,
+    "wall_ms": 928.7520000000313,
+    "detail": {},
+    "command": [
+      "D:\\Desktop\\cascii\\target\\release\\cascii.exe",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "--out",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_baseline_0",
+      "--default",
+      "--columns",
+      "400",
+      "--fps",
+      "30",
+      "--font-ratio",
+      "0.7",
+      "--luminance",
+      "20",
+      "--color-only"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "stream_gpu_full",
+    "rep": 0,
+    "warmup": true,
+    "wall_ms": 2691.385099999934,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 757.8342999999998,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": false,
+      "setup_ms": 133.5261,
+      "total_ms": 2605.9554,
+      "write_ms": 58.56570000000002
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cpu",
+      "0",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_stream_gpu_full_0"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "cuda_scale_gpu",
+    "rep": 0,
+    "warmup": true,
+    "wall_ms": 1192.2051999999894,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 53.62899999999999,
+      "frames": 120,
+      "hwdecode": true,
+      "prescale": true,
+      "setup_ms": 134.6294,
+      "total_ms": 1097.3538,
+      "write_ms": 54.6179
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cuda",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_cuda_scale_gpu_0"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "stream_cpu_full",
+    "rep": 0,
+    "warmup": true,
+    "wall_ms": 8581.494399999996,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 7091.092800000003,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": false,
+      "setup_ms": 0.0018,
+      "total_ms": 8517.3706,
+      "write_ms": 43.42420000000004
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cpu",
+      "0",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_stream_cpu_full_0"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "stream_cpu_small",
+    "rep": 0,
+    "warmup": true,
+    "wall_ms": 1031.628899999987,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 665.3797999999998,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": true,
+      "setup_ms": 0.0033,
+      "total_ms": 962.2007,
+      "write_ms": 54.08739999999998
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cpu",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_stream_cpu_small_0"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "cuda_scale_cpu",
+    "rep": 0,
+    "warmup": true,
+    "wall_ms": 1094.8753000000124,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 523.8738000000001,
+      "frames": 120,
+      "hwdecode": true,
+      "prescale": true,
+      "setup_ms": 0.0033,
+      "total_ms": 1019.5600000000001,
+      "write_ms": 40.09950000000001
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cuda",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_cuda_scale_cpu_0"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "stream_gpu_small",
+    "rep": 0,
+    "warmup": true,
+    "wall_ms": 1015.1111999999785,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 101.39039999999999,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": true,
+      "setup_ms": 125.9831,
+      "total_ms": 935.557,
+      "write_ms": 109.21379999999996
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cpu",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_stream_gpu_small_0"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "baseline",
+    "rep": 1,
+    "warmup": false,
+    "wall_ms": 1065.1626000000078,
+    "detail": {},
+    "command": [
+      "D:\\Desktop\\cascii\\target\\release\\cascii.exe",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "--out",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_baseline_1",
+      "--default",
+      "--columns",
+      "400",
+      "--fps",
+      "30",
+      "--font-ratio",
+      "0.7",
+      "--luminance",
+      "20",
+      "--color-only"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "stream_gpu_full",
+    "rep": 1,
+    "warmup": false,
+    "wall_ms": 3018.297299999972,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 856.6916000000003,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": false,
+      "setup_ms": 129.94230000000002,
+      "total_ms": 2931.6679,
+      "write_ms": 174.95379999999994
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cpu",
+      "0",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_stream_gpu_full_1"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "cuda_scale_gpu",
+    "rep": 1,
+    "warmup": false,
+    "wall_ms": 1166.708299999982,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 53.0823,
+      "frames": 120,
+      "hwdecode": true,
+      "prescale": true,
+      "setup_ms": 129.6693,
+      "total_ms": 1073.5165,
+      "write_ms": 55.367
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cuda",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_cuda_scale_gpu_1"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "stream_cpu_small",
+    "rep": 1,
+    "warmup": false,
+    "wall_ms": 1057.8779999999597,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 681.5432000000003,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": true,
+      "setup_ms": 0.0035,
+      "total_ms": 985.1764,
+      "write_ms": 56.30180000000002
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cpu",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_stream_cpu_small_1"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "cuda_scale_cpu",
+    "rep": 1,
+    "warmup": false,
+    "wall_ms": 1036.196000000018,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 528.4613,
+      "frames": 120,
+      "hwdecode": true,
+      "prescale": true,
+      "setup_ms": 0.0033,
+      "total_ms": 962.5885,
+      "write_ms": 38.937299999999986
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cuda",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_cuda_scale_cpu_1"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "stream_gpu_small",
+    "rep": 1,
+    "warmup": false,
+    "wall_ms": 902.3154999999861,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 82.82209999999999,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": true,
+      "setup_ms": 124.903,
+      "total_ms": 823.2748,
+      "write_ms": 81.11749999999998
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cpu",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_stream_gpu_small_1"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "stream_cpu_full",
+    "rep": 1,
+    "warmup": false,
+    "wall_ms": 8774.727600000006,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 7208.559899999998,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": false,
+      "setup_ms": 0.0018,
+      "total_ms": 8705.2897,
+      "write_ms": 132.68989999999997
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cpu",
+      "0",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_stream_cpu_full_1"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "cuda_scale_cpu",
+    "rep": 2,
+    "warmup": false,
+    "wall_ms": 1075.0659999999925,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 528.1718,
+      "frames": 120,
+      "hwdecode": true,
+      "prescale": true,
+      "setup_ms": 0.0036,
+      "total_ms": 1004.7423,
+      "write_ms": 39.382900000000014
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cuda",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_cuda_scale_cpu_2"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "baseline",
+    "rep": 2,
+    "warmup": false,
+    "wall_ms": 969.6979000000283,
+    "detail": {},
+    "command": [
+      "D:\\Desktop\\cascii\\target\\release\\cascii.exe",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "--out",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_baseline_2",
+      "--default",
+      "--columns",
+      "400",
+      "--fps",
+      "30",
+      "--font-ratio",
+      "0.7",
+      "--luminance",
+      "20",
+      "--color-only"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "stream_gpu_small",
+    "rep": 2,
+    "warmup": false,
+    "wall_ms": 909.2679000000317,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 89.88859999999997,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": true,
+      "setup_ms": 129.51299999999998,
+      "total_ms": 830.5772000000001,
+      "write_ms": 88.33409999999998
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cpu",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_stream_gpu_small_2"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "stream_cpu_full",
+    "rep": 2,
+    "warmup": false,
+    "wall_ms": 8831.80249999998,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 7259.5122999999985,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": false,
+      "setup_ms": 0.002,
+      "total_ms": 8752.4561,
+      "write_ms": 46.2652
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cpu",
+      "0",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_stream_cpu_full_2"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "cuda_scale_gpu",
+    "rep": 2,
+    "warmup": false,
+    "wall_ms": 1175.167300000112,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 56.7731,
+      "frames": 120,
+      "hwdecode": true,
+      "prescale": true,
+      "setup_ms": 132.27839999999998,
+      "total_ms": 1095.4938,
+      "write_ms": 56.526100000000035
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cuda",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_cuda_scale_gpu_2"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "stream_gpu_full",
+    "rep": 2,
+    "warmup": false,
+    "wall_ms": 2657.2779000000537,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 748.8891,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": false,
+      "setup_ms": 133.36090000000002,
+      "total_ms": 2574.2257,
+      "write_ms": 67.57259999999998
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cpu",
+      "0",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_stream_gpu_full_2"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "stream_cpu_small",
+    "rep": 2,
+    "warmup": false,
+    "wall_ms": 1046.7078000001493,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 667.3861000000002,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": true,
+      "setup_ms": 0.0036,
+      "total_ms": 982.3298,
+      "write_ms": 60.16459999999998
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cpu",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_stream_cpu_small_2"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "stream_gpu_full",
+    "rep": 3,
+    "warmup": false,
+    "wall_ms": 2881.2788000000182,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 809.3939000000004,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": false,
+      "setup_ms": 132.6073,
+      "total_ms": 2797.6691,
+      "write_ms": 189.43190000000004
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cpu",
+      "0",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_stream_gpu_full_3"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "cuda_scale_cpu",
+    "rep": 3,
+    "warmup": false,
+    "wall_ms": 1099.8478000001342,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 538.2556,
+      "frames": 120,
+      "hwdecode": true,
+      "prescale": true,
+      "setup_ms": 0.0033,
+      "total_ms": 1024.1107,
+      "write_ms": 56.073499999999996
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cuda",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_cuda_scale_cpu_3"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "stream_cpu_full",
+    "rep": 3,
+    "warmup": false,
+    "wall_ms": 8983.898899999986,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 7397.222099999998,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": false,
+      "setup_ms": 0.0018,
+      "total_ms": 8917.969299999999,
+      "write_ms": 58.49049999999999
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cpu",
+      "0",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_stream_cpu_full_3"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "stream_gpu_small",
+    "rep": 3,
+    "warmup": false,
+    "wall_ms": 1059.32010000015,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 89.22029999999994,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": true,
+      "setup_ms": 151.89520000000002,
+      "total_ms": 976.4737,
+      "write_ms": 83.73219999999996
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cpu",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_stream_gpu_small_3"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "cuda_scale_gpu",
+    "rep": 3,
+    "warmup": false,
+    "wall_ms": 1173.5065000000304,
+    "detail": {
+      "backend": "gpu",
+      "compute_ms": 54.7665,
+      "frames": 120,
+      "hwdecode": true,
+      "prescale": true,
+      "setup_ms": 137.9519,
+      "total_ms": 1093.5017,
+      "write_ms": 42.84129999999999
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "gpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cuda",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_cuda_scale_gpu_3"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "baseline",
+    "rep": 3,
+    "warmup": false,
+    "wall_ms": 1071.3230999999723,
+    "detail": {},
+    "command": [
+      "D:\\Desktop\\cascii\\target\\release\\cascii.exe",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "--out",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_baseline_3",
+      "--default",
+      "--columns",
+      "400",
+      "--fps",
+      "30",
+      "--font-ratio",
+      "0.7",
+      "--luminance",
+      "20",
+      "--color-only"
+    ]
+  },
+  {
+    "clip": "4k",
+    "mode": "stream_cpu_small",
+    "rep": 3,
+    "warmup": false,
+    "wall_ms": 1154.3122999999014,
+    "detail": {
+      "backend": "cpu",
+      "compute_ms": 691.8232000000002,
+      "frames": 120,
+      "hwdecode": false,
+      "prescale": true,
+      "setup_ms": 0.0034000000000000002,
+      "total_ms": 1093.866,
+      "write_ms": 145.77729999999994
+    },
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "video",
+      "cpu",
+      "D:\\Desktop\\cascii\\research\\fixtures\\motion_4k.mp4",
+      "3840",
+      "2160",
+      "400",
+      "cpu",
+      "1",
+      "D:\\Desktop\\cascii\\research\\results\\video-output\\20261110-013529\\4k_stream_cpu_small_3"
+    ]
+  }
+]

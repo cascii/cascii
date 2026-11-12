@@ -1,0 +1,53 @@
+cargo :    Compiling proc-macro2 v1.0.106
+At line:2 char:149
++ ... og -Tail 8; cargo test --no-default-features --lib --locked *> resear ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling proc-macro2 v1.0.106:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   Compiling quote v1.0.45
+   Compiling windows-sys v0.61.2
+   Compiling once_cell v1.21.4
+   Compiling tempfile v3.27.0
+   Compiling syn v2.0.117
+   Compiling serde_derive v1.0.228
+   Compiling serde v1.0.228
+   Compiling serde_spanned v0.6.9
+   Compiling toml_datetime v0.6.11
+   Compiling toml_edit v0.22.27
+   Compiling toml v0.8.23
+   Compiling cascii v0.33.0 (D:\Desktop\cascii)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.64s
+     Running unittests src\lib.rs (target\debug\deps\cascii-1ad84fd434076163.exe)
+
+running 27 tests
+test cell_filter::tests::test_luminance_rgb_reference_values ... ok
+test cell_filter::tests::test_cframe_mask_out_of_bounds_cells_pass ... ok
+test cell_filter::tests::test_ramp_luminance_scales_positions_to_full_range ... ok
+test color_shift::tests::detects_flagged_and_legacy_background_payloads ... ok
+test cell_filter::tests::test_proximity_mask_contrasting_pair_fails_both_ways ... ok
+test cell_filter::tests::test_proximity_mask_blank_cells_pass_and_are_excluded_from_mean ... ok
+test cell_filter::tests::test_cframe_mask_keeps_bright_and_drops_dark_cells ... ok
+test cell_filter::tests::test_proximity_mask_out_of_bounds_and_malformed ... ok
+test cell_filter::tests::test_proximity_mask_keeps_smooth_gradients ... ok
+test cell_filter::tests::test_cframe_mask_rejects_malformed_payloads ... ok
+test cell_filter::tests::test_ramp_luminance_validation ... ok
+test cell_filter::tests::test_ramp_luminance_unknown_chars_pass ... ok
+test cell_filter::tests::test_filter_bounds_respect_strictness_and_activity ... ok
+test color_shift::tests::rotates_primary_colors ... ok
+test cell_filter::tests::test_proximity_mask_keeps_dominant_region_and_drops_outliers ... ok
+test cell_filter::tests::test_rgb_distance_reference_values ... ok
+test color_shift::tests::background_shift_is_noop_without_background_payload ... ok
+test color_shift::tests::shifts_flagged_foreground_and_background_independently ... ok
+test color_shift::tests::leaves_grayscale_unchanged ... ok
+test color_shift::tests::shifts_legacy_unflagged_background ... ok
+test frame::tests::test_char_for_thresholds ... ok
+test frame::tests::test_encode_cframe_with_background_extension ... ok
+test frame::tests::test_image_to_frame_rejects_background_modes ... ok
+test frame::tests::test_cframe_bytes_layout ... ok
+test frame::tests::test_image_to_frame_dimensions_and_payloads ... ok
+test frame::tests::test_image_bytes_to_frame_decodes_png ... ok
+test frame::tests::multiple_in_memory_sizes_match_independent_conversions ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+

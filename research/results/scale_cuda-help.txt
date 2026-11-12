@@ -1,0 +1,26 @@
+Filter scale_cuda
+  GPU accelerated video resizer
+    Inputs:
+       #0: default (video)
+    Outputs:
+       #0: default (video)
+cudascale AVOptions:
+   w                 <string>     ..FV....... Output video width (default "iw")
+   h                 <string>     ..FV....... Output video height (default "ih")
+   interp_algo       <int>        ..FV....... Interpolation algorithm used for resizing (from 0 to 4) (default 0)
+     nearest         1            ..FV....... nearest neighbour
+     bilinear        2            ..FV....... bilinear
+     bicubic         3            ..FV....... bicubic
+     lanczos         4            ..FV....... lanczos
+   format            <pix_fmt>    ..FV....... Output video pixel format (default none)
+   passthrough       <boolean>    ..FV....... Do not process frames at all if parameters match (default true)
+   param             <float>      ..FV....... Algorithm-Specific parameter (from -FLT_MAX to FLT_MAX) (default 999999)
+   force_original_aspect_ratio <int>        ..FV....... decrease or increase w/h if necessary to keep the original AR (from 0 to 2) (default disable)
+     disable         0            ..FV.......
+     decrease        1            ..FV.......
+     increase        2            ..FV.......
+   force_divisible_by <int>        ..FV....... enforce that the output resolution is divisible by a defined integer when force_original_aspect_ratio is used (from 1 to 256) (default 1)
+   reset_sar         <boolean>    ..FV....... reset SAR to 1 and scale to square pixels if scaling proportionally (default false)
+
+
+Exiting with exit code 0

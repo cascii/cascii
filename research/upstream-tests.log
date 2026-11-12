@@ -1,0 +1,219 @@
+cargo :    Compiling proc-macro2 v1.0.106
+At line:2 char:85
++ ... og -Tail 8; cargo test --locked *> research/upstream-tests.log; Get-C ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling proc-macro2 v1.0.106:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.45
+   Compiling windows-link v0.2.1
+   Compiling cfg-if v1.0.4
+   Compiling serde_core v1.0.228
+   Compiling crossbeam-utils v0.8.21
+   Compiling windows_x86_64_msvc v0.52.6
+   Compiling windows_x86_64_msvc v0.48.5
+   Compiling serde v1.0.228
+   Compiling autocfg v1.5.0
+   Compiling libc v0.2.184
+   Compiling crc32fast v1.5.0
+   Compiling simd-adler32 v0.3.9
+   Compiling once_cell v1.21.4
+   Compiling rayon-core v1.13.0
+   Compiling windows-sys v0.61.2
+   Compiling utf8parse v0.2.2
+   Compiling adler2 v2.0.1
+   Compiling getrandom v0.4.2
+   Compiling anstyle v1.0.14
+   Compiling once_cell_polyfill v1.70.2
+   Compiling miniz_oxide v0.8.9
+   Compiling windows-targets v0.52.6
+   Compiling windows-targets v0.48.5
+   Compiling anstyle-query v1.1.5
+   Compiling anstyle-wincon v3.0.11
+   Compiling windows-sys v0.59.0
+   Compiling anstyle-parse v1.0.0
+   Compiling unicode-width v0.2.2
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling crossbeam-epoch v0.9.18
+   Compiling num-traits v0.2.19
+   Compiling portable-atomic v1.13.1
+   Compiling hashbrown v0.17.0
+   Compiling colorchoice v1.0.5
+   Compiling zmij v1.0.21
+   Compiling thiserror v1.0.69
+   Compiling equivalent v1.0.2
+   Compiling encode_unicode v1.0.0
+   Compiling anstream v1.0.0
+   Compiling crossbeam-deque v0.8.6
+   Compiling indexmap v2.14.0
+   Compiling console v0.15.11
+   Compiling flate2 v1.1.9
+   Compiling windows-sys v0.48.0
+   Compiling winapi-util v0.1.11
+   Compiling syn v2.0.117
+   Compiling fdeflate v0.3.7
+   Compiling thread_local v1.1.9
+   Compiling toml_write v0.1.2
+   Compiling either v1.15.0
+   Compiling anyhow v1.0.102
+   Compiling pxfm v0.1.28
+   Compiling clap_lex v1.1.0
+   Compiling bitflags v2.11.0
+   Compiling fastrand v2.4.1
+   Compiling zune-core v0.5.1
+   Compiling strsim v0.11.1
+   Compiling heck v0.5.0
+   Compiling option-ext v0.2.0
+   Compiling serde_json v1.0.149
+   Compiling winnow v0.7.15
+   Compiling ttf-parser v0.25.1
+   Compiling png v0.18.1
+   Compiling clap_builder v4.6.0
+   Compiling tempfile v3.27.0
+   Compiling rayon v1.11.0
+   Compiling fuzzy-matcher v0.3.7
+   Compiling zune-jpeg v0.5.15
+   Compiling dirs-sys v0.4.1
+   Compiling same-file v1.0.6
+   Compiling memchr v2.8.0
+   Compiling number_prefix v0.4.0
+   Compiling zeroize v1.8.2
+   Compiling byteorder-lite v0.1.0
+   Compiling shell-words v1.1.1
+   Compiling itoa v1.0.18
+   Compiling ab_glyph_rasterizer v0.1.10
+   Compiling bytemuck v1.25.0
+   Compiling walkdir v2.5.0
+   Compiling dirs v5.0.1
+   Compiling owned_ttf_parser v0.25.1
+   Compiling ab_glyph v0.2.32
+   Compiling serde_derive v1.0.228
+   Compiling thiserror-impl v1.0.69
+   Compiling clap_derive v4.6.0
+   Compiling indicatif v0.17.11
+   Compiling dialoguer v0.11.0
+   Compiling clap v4.6.0
+   Compiling moxcms v0.8.1
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling toml_edit v0.22.27
+   Compiling toml v0.8.23
+   Compiling image v0.25.10
+   Compiling cascii v0.33.0 (D:\Desktop\cascii)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 53.69s
+     Running unittests src\lib.rs (target\debug\deps\cascii-c0bf651ee72a805c.exe)
+
+running 61 tests
+test cell_filter::tests::test_filter_bounds_respect_strictness_and_activity ... ok
+test cell_filter::tests::test_luminance_rgb_reference_values ... ok
+test cell_filter::tests::test_cframe_mask_rejects_malformed_payloads ... ok
+test cell_filter::tests::test_cframe_mask_out_of_bounds_cells_pass ... ok
+test cell_filter::tests::test_proximity_mask_blank_cells_pass_and_are_excluded_from_mean ... ok
+test cell_filter::tests::test_proximity_mask_contrasting_pair_fails_both_ways ... ok
+test cell_filter::tests::test_proximity_mask_keeps_dominant_region_and_drops_outliers ... ok
+test cell_filter::tests::test_proximity_mask_out_of_bounds_and_malformed ... ok
+test cell_filter::tests::test_proximity_mask_keeps_smooth_gradients ... ok
+test cell_filter::tests::test_ramp_luminance_scales_positions_to_full_range ... ok
+test cell_filter::tests::test_ramp_luminance_validation ... ok
+test cell_filter::tests::test_cframe_mask_keeps_bright_and_drops_dark_cells ... ok
+test cell_filter::tests::test_ramp_luminance_unknown_chars_pass ... ok
+test cell_filter::tests::test_rgb_distance_reference_values ... ok
+test background_fit_optimized::tests::optimized_context_preserves_candidate_order ... ok
+test color_shift::tests::background_shift_is_noop_without_background_payload ... ok
+test color_shift::tests::detects_flagged_and_legacy_background_payloads ... ok
+test color_shift::tests::leaves_grayscale_unchanged ... ok
+test color_shift::tests::rotates_primary_colors ... ok
+test color_shift::tests::shifts_flagged_foreground_and_background_independently ... ok
+test color_shift::tests::shifts_legacy_unflagged_background ... ok
+test frame::tests::test_char_for_thresholds ... ok
+test frame::tests::test_encode_cframe_with_background_extension ... ok
+test frame::tests::test_cframe_bytes_layout ... ok
+test frame::tests::test_image_to_frame_rejects_background_modes ... ok
+test frame::tests::test_image_to_frame_dimensions_and_payloads ... ok
+test frame::tests::test_image_bytes_to_frame_decodes_png ... ok
+test convert::tests::buffered_cframe_round_trip_matches_legacy_layout ... ok
+test convert::tests::cframe_round_trip_without_background ... ok
+test convert::tests::erase_cframe_background_preserves_text_and_foreground ... ok
+test convert::tests::cframe_reads_legacy_bg_without_flag_byte ... ok
+test loop_detect::tests::collapses_candidates_whose_endpoints_are_adjacent_duplicate_frames ... ok
+test convert::tests::cframe_round_trip_with_background_uses_flag_byte ... ok
+test convert::tests::convert_directory_returns_cancelled_when_token_tripped ... ok
+test convert::tests::erase_cframe_text_preserves_background ... ok
+test convert::tests::dedup_buckets_groups_adjacent_and_non_adjacent_identical_pngs ... ok
+test loop_detect::tests::color_mode_compares_foreground_and_background ... ok
+test loop_detect::tests::detects_three_occurrences_in_cframe_only_directory ... ok
+test convert::tests::convert_directory_completes_without_cancel_token ... ok
+test loop_detect::tests::isolated_similar_frames_do_not_form_a_visual_loop ... ok
+test background_fit_optimized::tests::optimized_output_matches_legacy_output_fast ... ok
+test packed::tests::full_pack_preserves_background_extension_bytes ... ok
+test preprocessing::tests::resolves_preprocess_output_path_for_directory_target ... ok
+test preprocessing::tests::standalone_filter_complex_wraps_filter_on_black_background ... ok
+test loop_detect::tests::later_occurrences_must_match_the_first_occurrence ... ok
+test loop_detect::tests::visual_text_deduplicates_adjacent_endpoints_even_when_colors_differ ... ok
+test frame::tests::multiple_in_memory_sizes_match_independent_conversions ... ok
+test packed::tests::full_pack_from_dir_sorts_and_preserves_complete_files ... ok
+test render::tests::blends_foreground_glyph_over_background ... ok
+test loop_detect::tests::visual_text_finds_adjacent_glyph_substitutions ... ok
+test render::tests::renders_background_for_space_cells ... ok
+test render::tests::bg_fit_quadrant_bg_only_glyph_suppressed ... ok
+test render::tests::bg_fit_defaults_match_when_thresholds_equal ... ok
+test render::tests::bg_fit_quadrant_both_thresholds_met ... ok
+test render::tests::bg_fit_quadrant_glyph_only_bg_suppressed ... ok
+test convert::tests::convert_directory_copies_outputs_for_duplicate_pngs ... ok
+test render::tests::bg_fit_quadrant_neither_threshold_met ... ok
+test loop_detect::tests::exact_mode_finds_a_distant_repeated_sequence ... ok
+test background_fit_optimized::tests::optimized_output_matches_legacy_output ... ok
+test preprocessing::tests::preprocess_image_to_file_writes_output ... ok
+test preprocessing::tests::preprocess_video_to_file_writes_output ... ok
+
+test result: ok. 61 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+     Running unittests src\main.rs (target\debug\deps\cascii-481fa45085209bc3.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\multisize.rs (target\debug\deps\multisize-1ca87e31cb0f99f2.exe)
+
+running 11 tests
+test video_is_sampled_once_with_shared_audio_and_consistent_variant_timing ... ignored, requires FFmpeg with H.264/AAC encoders; run with --include-ignored
+test sizes_accept_scalars_lists_and_inclusive_ranges_and_reject_invalid_work ... ok
+test binary_rejects_truncation_trailing_data_wrong_indices_and_bad_frame_payloads ... ok
+test golden_binary_json_and_cell_csv_round_trip_foregrounds_backgrounds_and_punctuation ... ok
+test legacy_directory_api_honors_columns_and_keeps_separate_input_originals ... ok
+test failed_and_cancelled_jobs_remove_only_their_staging_files ... ok
+test text_only_binary_and_single_size_asset_output_work_without_color_sidecars ... ok
+test background_modes_match_independent_single_size_conversions ... ok
+test all_exports_produce_exact_sizes_from_one_image_and_preserve_source ... ok
+test a_directory_keeps_originals_and_frame_identity_even_with_mixed_aspect_ratios ... ok
+test cli_preserves_single_size_layout_and_accepts_the_three_column_forms ... ok
+
+test result: ok. 10 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.95s
+
+     Running tests\multisize_format.rs (target\debug\deps\multisize_format-14297262ed760323.exe)
+
+running 1 test
+test portable_codec_matches_the_shared_encoder_fixture ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests cascii
+
+running 12 tests
+test src\lib.rs - AsciiConverter::with_cancel_token (line 692) - compile ... ok
+test src\lib.rs - AsciiConverter::image_to_string (line 756) - compile ... ok
+test src\lib.rs - AsciiConverter::convert_video (line 785) - compile ... ok
+test src\lib.rs - AsciiConverter::convert_image (line 736) - compile ... ok
+test src\lib.rs - (line 49) - compile ... ok
+test src\lib.rs - AsciiConverter::with_ffmpeg_config (line 673) - compile ... ok
+test src\lib.rs - AsciiConverter::convert_directory_with_progress (line 977) - compile ... ok
+test src\lib.rs - Cancelled (line 157) - compile ... ok
+test src\lib.rs - AsciiConverter::convert_video_with_detailed_progress (line 879) - compile ... ok
+test src\lib.rs - (line 15) - compile ... ok
+test src\lib.rs - (line 33) - compile ... ok
+test src\lib.rs - AsciiConverter::convert_video_with_progress (line 814) - compile ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+

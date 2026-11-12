@@ -1,0 +1,43 @@
+Collecting matplotlib
+  Downloading matplotlib-3.10.9-cp310-cp310-win_amd64.whl (8.2 MB)
+     ---------------------------------------- 8.2/8.2 MB 8.5 MB/s eta 0:00:00
+Collecting cycler>=0.10
+  Downloading cycler-0.12.1-py3-none-any.whl (8.3 kB)
+Collecting pillow>=8
+  Using cached pillow-12.3.0-cp310-cp310-win_amd64.whl (7.2 MB)
+Collecting kiwisolver>=1.3.1
+  Downloading kiwisolver-1.5.1-cp310-cp310-win_amd64.whl (70 kB)
+     ---------------------------------------- 70.6/70.6 kB ? eta 0:00:00
+Collecting packaging>=20.0
+  Downloading packaging-26.3-py3-none-any.whl (129 kB)
+     -------------------------------------- 130.0/130.0 kB 7.5 MB/s eta 0:00:00
+Collecting pyparsing>=3
+  Downloading pyparsing-3.3.3-py3-none-any.whl (126 kB)
+     -------------------------------------- 126.4/126.4 kB 7.7 MB/s eta 0:00:00
+Collecting numpy>=1.23
+  Using cached numpy-2.2.6-cp310-cp310-win_amd64.whl (12.9 MB)
+Collecting fonttools>=4.22.0
+  Downloading fonttools-4.65.0-cp310-cp310-win_amd64.whl (1.6 MB)
+     ---------------------------------------- 1.6/1.6 MB 14.9 MB/s eta 0:00:00
+Collecting python-dateutil>=2.7
+  Downloading python_dateutil-3.0.0-py2.py3-none-any.whl (94 kB)
+     ---------------------------------------- 94.7/94.7 kB ? eta 0:00:00
+Collecting contourpy>=1.0.1
+  Downloading contourpy-1.3.2-cp310-cp310-win_amd64.whl (221 kB)
+     ------------------------------------- 221.2/221.2 kB 14.1 MB/s eta 0:00:00
+Collecting six>=1.6
+  Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+Collecting tzdata
+  Downloading tzdata-2026.6-py2.py3-none-any.whl (348 kB)
+     ------------------------------------- 348.2/348.2 kB 22.5 MB/s eta 0:00:00
+Installing collected packages: tzdata, six, pyparsing, pillow, packaging, numpy, kiwisolver, fonttools, cycler, python-dateutil, contourpy, matplotlib
+Successfully installed contourpy-1.3.2 cycler-0.12.1 fonttools-4.65.0 kiwisolver-1.5.1 matplotlib-3.10.9 numpy-2.2.6 packaging-26.3 pillow-12.3.0 pyparsing-3.3.3 python-dateutil-3.0.0 six-1.17.0 tzdata-2026.6
+research/.venv/Scripts/python.exe : 
+At line:2 char:32
++ ... arch/.venv; research/.venv/Scripts/python.exe -m pip install matplotl ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[notice] A new release of pip available: 22.2.2 -> 26.3
+[notice] To update, run: D:\Desktop\cascii\research\.venv\Scripts\python.exe -m pip install --upgrade pip

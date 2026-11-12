@@ -1,0 +1,394 @@
+[
+  {
+    "image": "test_01.png",
+    "mode": "gpu",
+    "rep": 0,
+    "warmup": true,
+    "wall_ms": 237.19329999994443,
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "image",
+      "gpu",
+      "D:\\Desktop\\cascii\\resources\\test_01.png",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\test_01.png_gpu_0\\frame.cframe"
+    ]
+  },
+  {
+    "image": "test_01.png",
+    "mode": "baseline",
+    "rep": 0,
+    "warmup": true,
+    "wall_ms": 73.6533999997846,
+    "command": [
+      "D:\\Desktop\\cascii\\target\\release\\cascii.exe",
+      "D:\\Desktop\\cascii\\resources\\test_01.png",
+      "--out",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\test_01.png_baseline_0",
+      "--default",
+      "--columns",
+      "400",
+      "--font-ratio",
+      "0.7",
+      "--luminance",
+      "20",
+      "--color-only"
+    ]
+  },
+  {
+    "image": "test_01.png",
+    "mode": "cpu",
+    "rep": 0,
+    "warmup": true,
+    "wall_ms": 134.15620000000672,
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "image",
+      "cpu",
+      "D:\\Desktop\\cascii\\resources\\test_01.png",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\test_01.png_cpu_0\\frame.cframe"
+    ]
+  },
+  {
+    "image": "test_01.png",
+    "mode": "cpu",
+    "rep": 1,
+    "warmup": false,
+    "wall_ms": 137.24330000013651,
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "image",
+      "cpu",
+      "D:\\Desktop\\cascii\\resources\\test_01.png",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\test_01.png_cpu_1\\frame.cframe"
+    ]
+  },
+  {
+    "image": "test_01.png",
+    "mode": "gpu",
+    "rep": 1,
+    "warmup": false,
+    "wall_ms": 240.71649999996225,
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "image",
+      "gpu",
+      "D:\\Desktop\\cascii\\resources\\test_01.png",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\test_01.png_gpu_1\\frame.cframe"
+    ]
+  },
+  {
+    "image": "test_01.png",
+    "mode": "baseline",
+    "rep": 1,
+    "warmup": false,
+    "wall_ms": 72.26900000000569,
+    "command": [
+      "D:\\Desktop\\cascii\\target\\release\\cascii.exe",
+      "D:\\Desktop\\cascii\\resources\\test_01.png",
+      "--out",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\test_01.png_baseline_1",
+      "--default",
+      "--columns",
+      "400",
+      "--font-ratio",
+      "0.7",
+      "--luminance",
+      "20",
+      "--color-only"
+    ]
+  },
+  {
+    "image": "test_01.png",
+    "mode": "gpu",
+    "rep": 2,
+    "warmup": false,
+    "wall_ms": 234.0288000000328,
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "image",
+      "gpu",
+      "D:\\Desktop\\cascii\\resources\\test_01.png",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\test_01.png_gpu_2\\frame.cframe"
+    ]
+  },
+  {
+    "image": "test_01.png",
+    "mode": "baseline",
+    "rep": 2,
+    "warmup": false,
+    "wall_ms": 72.89120000018556,
+    "command": [
+      "D:\\Desktop\\cascii\\target\\release\\cascii.exe",
+      "D:\\Desktop\\cascii\\resources\\test_01.png",
+      "--out",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\test_01.png_baseline_2",
+      "--default",
+      "--columns",
+      "400",
+      "--font-ratio",
+      "0.7",
+      "--luminance",
+      "20",
+      "--color-only"
+    ]
+  },
+  {
+    "image": "test_01.png",
+    "mode": "cpu",
+    "rep": 2,
+    "warmup": false,
+    "wall_ms": 139.3666999999823,
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "image",
+      "cpu",
+      "D:\\Desktop\\cascii\\resources\\test_01.png",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\test_01.png_cpu_2\\frame.cframe"
+    ]
+  },
+  {
+    "image": "test_01.png",
+    "mode": "cpu",
+    "rep": 3,
+    "warmup": false,
+    "wall_ms": 126.382299999932,
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "image",
+      "cpu",
+      "D:\\Desktop\\cascii\\resources\\test_01.png",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\test_01.png_cpu_3\\frame.cframe"
+    ]
+  },
+  {
+    "image": "test_01.png",
+    "mode": "baseline",
+    "rep": 3,
+    "warmup": false,
+    "wall_ms": 71.05300000011994,
+    "command": [
+      "D:\\Desktop\\cascii\\target\\release\\cascii.exe",
+      "D:\\Desktop\\cascii\\resources\\test_01.png",
+      "--out",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\test_01.png_baseline_3",
+      "--default",
+      "--columns",
+      "400",
+      "--font-ratio",
+      "0.7",
+      "--luminance",
+      "20",
+      "--color-only"
+    ]
+  },
+  {
+    "image": "test_01.png",
+    "mode": "gpu",
+    "rep": 3,
+    "warmup": false,
+    "wall_ms": 230.28930000009495,
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "image",
+      "gpu",
+      "D:\\Desktop\\cascii\\resources\\test_01.png",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\test_01.png_gpu_3\\frame.cframe"
+    ]
+  },
+  {
+    "image": "source.png",
+    "mode": "gpu",
+    "rep": 0,
+    "warmup": true,
+    "wall_ms": 316.4743999998336,
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "image",
+      "gpu",
+      "D:\\Desktop\\cascii\\resources\\source.png",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\source.png_gpu_0\\frame.cframe"
+    ]
+  },
+  {
+    "image": "source.png",
+    "mode": "baseline",
+    "rep": 0,
+    "warmup": true,
+    "wall_ms": 153.36330000013731,
+    "command": [
+      "D:\\Desktop\\cascii\\target\\release\\cascii.exe",
+      "D:\\Desktop\\cascii\\resources\\source.png",
+      "--out",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\source.png_baseline_0",
+      "--default",
+      "--columns",
+      "400",
+      "--font-ratio",
+      "0.7",
+      "--luminance",
+      "20",
+      "--color-only"
+    ]
+  },
+  {
+    "image": "source.png",
+    "mode": "cpu",
+    "rep": 0,
+    "warmup": true,
+    "wall_ms": 211.62760000015624,
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "image",
+      "cpu",
+      "D:\\Desktop\\cascii\\resources\\source.png",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\source.png_cpu_0\\frame.cframe"
+    ]
+  },
+  {
+    "image": "source.png",
+    "mode": "cpu",
+    "rep": 1,
+    "warmup": false,
+    "wall_ms": 204.84639999995125,
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "image",
+      "cpu",
+      "D:\\Desktop\\cascii\\resources\\source.png",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\source.png_cpu_1\\frame.cframe"
+    ]
+  },
+  {
+    "image": "source.png",
+    "mode": "gpu",
+    "rep": 1,
+    "warmup": false,
+    "wall_ms": 316.71239999991485,
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "image",
+      "gpu",
+      "D:\\Desktop\\cascii\\resources\\source.png",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\source.png_gpu_1\\frame.cframe"
+    ]
+  },
+  {
+    "image": "source.png",
+    "mode": "baseline",
+    "rep": 1,
+    "warmup": false,
+    "wall_ms": 152.42750000015803,
+    "command": [
+      "D:\\Desktop\\cascii\\target\\release\\cascii.exe",
+      "D:\\Desktop\\cascii\\resources\\source.png",
+      "--out",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\source.png_baseline_1",
+      "--default",
+      "--columns",
+      "400",
+      "--font-ratio",
+      "0.7",
+      "--luminance",
+      "20",
+      "--color-only"
+    ]
+  },
+  {
+    "image": "source.png",
+    "mode": "gpu",
+    "rep": 2,
+    "warmup": false,
+    "wall_ms": 318.654400000014,
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "image",
+      "gpu",
+      "D:\\Desktop\\cascii\\resources\\source.png",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\source.png_gpu_2\\frame.cframe"
+    ]
+  },
+  {
+    "image": "source.png",
+    "mode": "baseline",
+    "rep": 2,
+    "warmup": false,
+    "wall_ms": 153.48859999994602,
+    "command": [
+      "D:\\Desktop\\cascii\\target\\release\\cascii.exe",
+      "D:\\Desktop\\cascii\\resources\\source.png",
+      "--out",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\source.png_baseline_2",
+      "--default",
+      "--columns",
+      "400",
+      "--font-ratio",
+      "0.7",
+      "--luminance",
+      "20",
+      "--color-only"
+    ]
+  },
+  {
+    "image": "source.png",
+    "mode": "cpu",
+    "rep": 2,
+    "warmup": false,
+    "wall_ms": 211.83089999999538,
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "image",
+      "cpu",
+      "D:\\Desktop\\cascii\\resources\\source.png",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\source.png_cpu_2\\frame.cframe"
+    ]
+  },
+  {
+    "image": "source.png",
+    "mode": "cpu",
+    "rep": 3,
+    "warmup": false,
+    "wall_ms": 210.64690000002884,
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "image",
+      "cpu",
+      "D:\\Desktop\\cascii\\resources\\source.png",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\source.png_cpu_3\\frame.cframe"
+    ]
+  },
+  {
+    "image": "source.png",
+    "mode": "baseline",
+    "rep": 3,
+    "warmup": false,
+    "wall_ms": 163.94940000009228,
+    "command": [
+      "D:\\Desktop\\cascii\\target\\release\\cascii.exe",
+      "D:\\Desktop\\cascii\\resources\\source.png",
+      "--out",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\source.png_baseline_3",
+      "--default",
+      "--columns",
+      "400",
+      "--font-ratio",
+      "0.7",
+      "--luminance",
+      "20",
+      "--color-only"
+    ]
+  },
+  {
+    "image": "source.png",
+    "mode": "gpu",
+    "rep": 3,
+    "warmup": false,
+    "wall_ms": 359.0913000000455,
+    "command": [
+      "D:\\Desktop\\cascii\\research\\gpu-bench\\target\\release\\cascii-gpu-bench.exe",
+      "image",
+      "gpu",
+      "D:\\Desktop\\cascii\\resources\\source.png",
+      "D:\\Desktop\\cascii\\research\\results\\image-output\\20261110-013922\\source.png_gpu_3\\frame.cframe"
+    ]
+  }
+]

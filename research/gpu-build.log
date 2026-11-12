@@ -1,0 +1,8 @@
+cargo :    Compiling cascii-gpu-bench v0.1.0 (D:\Desktop\cascii\research\gpu-bench)
+At line:2 char:126
++ ... -- --check; cargo build --release --locked --manifest-path research/g ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ca...arch\gpu-bench):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    Finished `release` profile [optimized] target(s) in 39.13s

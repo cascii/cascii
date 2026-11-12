@@ -1,0 +1,35 @@
+{
+  "fitters": [
+    {
+      "columns": 80,
+      "legacy_vs_optimized_byte_identical": true,
+      "sha256": "3997f3e91e6d96050eb1378378752cd1815ab73ac33e3c852a1aee31110e6c7c"
+    },
+    {
+      "columns": 160,
+      "legacy_vs_optimized_byte_identical": true,
+      "sha256": "6ccb2cabe597f53d91ccee88a7dce850816383fecf1892d1ee8b4bcdb57e9393"
+    },
+    {
+      "columns": 400,
+      "legacy_vs_optimized_byte_identical": true,
+      "sha256": "528e0932389c7576fba6b4dda89e92d1d541145fd4fe6485f5c1b6ec7db3f6f6"
+    }
+  ],
+  "images": [
+    {
+      "image": "test_01.png",
+      "cpu_matches_upstream": true,
+      "gpu_char_mismatch_pct": 0.0047169811320754715,
+      "gpu_rgb_max_abs": 1,
+      "gpu_rgb_mae": 0.00015330188679245284
+    },
+    {
+      "image": "source.png",
+      "cpu_matches_upstream": true,
+      "gpu_char_mismatch_pct": 0.0,
+      "gpu_rgb_max_abs": 1,
+      "gpu_rgb_mae": 1.0822510822510823e-05
+    }
+  ]
+}
