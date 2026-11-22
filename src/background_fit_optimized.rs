@@ -10,19 +10,19 @@ use crate::BgFitQuality;
 const FONT_DATA: &[u8] = include_bytes!("../resources/DejaVuSansMono.ttf");
 
 #[derive(Debug)]
-struct OptimizedGlyph {
-    byte: u8,
-    alpha: Vec<f32>,
-    s_aa: f64,
-    s_ab: f64,
-    s_bb: f64,
-    determinant: f64,
-    degenerate: bool,
+pub(crate) struct OptimizedGlyph {
+    pub(crate) byte: u8,
+    pub(crate) alpha: Vec<f32>,
+    pub(crate) s_aa: f64,
+    pub(crate) s_ab: f64,
+    pub(crate) s_bb: f64,
+    pub(crate) determinant: f64,
+    pub(crate) degenerate: bool,
 }
 
 #[derive(Debug)]
 pub(crate) struct OptimizedBackgroundAnalysisContext {
-    glyphs: Vec<OptimizedGlyph>,
+    pub(crate) glyphs: Vec<OptimizedGlyph>,
     pub(crate) cell_width: u32,
     pub(crate) cell_height: u32,
 }
@@ -197,7 +197,7 @@ fn convert_row(image: &image::RgbImage, row: u32, width_chars: u32, threshold: u
 
 // Mirrors render::fit_colors_for_glyph: the fit error is expanded algebraically from the accumulated sums (s_bp = Σp − s_ap),
 // so no second pass over the patch is needed. The operation order must stay identical to the legacy fitter for output parity.
-fn fit_colors(patch: &[Rgb<u8>], glyph: &OptimizedGlyph, average_rgb: [u8; 3], sum_pixel: [f64; 3], sum_pixel_sq: f64) -> ([u8; 3], [u8; 3], f64) {
+pub(crate) fn fit_colors(patch: &[Rgb<u8>], glyph: &OptimizedGlyph, average_rgb: [u8; 3], sum_pixel: [f64; 3], sum_pixel_sq: f64) -> ([u8; 3], [u8; 3], f64) {
     if glyph.degenerate {
         return (average_rgb, average_rgb, constant_patch_error(patch.len(), average_rgb, sum_pixel, sum_pixel_sq));
     }

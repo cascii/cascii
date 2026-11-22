@@ -142,12 +142,17 @@ struct Args {
     crf: u8,
 
     /// Experimental option C: fit per-cell foreground/background colors for direct video rendering
-    #[arg(long, default_value_t = false, conflicts_with = "fit_cell_backgrounds_optimized")]
+    #[arg(long, default_value_t = false, conflicts_with_all = &["fit_cell_backgrounds_optimized", "fit_cell_backgrounds_metal"])]
     fit_cell_backgrounds: bool,
 
     /// Optimized per-cell foreground/background fitting implementation
-    #[arg(long, default_value_t = false, conflicts_with = "fit_cell_backgrounds")]
+    #[arg(long, default_value_t = false, conflicts_with_all = &["fit_cell_backgrounds", "fit_cell_backgrounds_metal"])]
     fit_cell_backgrounds_optimized: bool,
+
+    /// Experimental macOS GPU fitting with CPU tie correction; tiny differences remain possible.
+    /// Requires a binary built with --features metal.
+    #[arg(long, default_value_t = false, conflicts_with_all = &["fit_cell_backgrounds", "fit_cell_backgrounds_optimized"])]
+    fit_cell_backgrounds_metal: bool,
 
     /// Override the luminance threshold used for the per-cell background pass.
     /// Defaults to the foreground `--luminance` value. Only effective when
@@ -479,7 +484,9 @@ fn main() -> Result<()> {
         OutputMode::TextOnly
     };
 
-    let cell_color_mode = if args.fit_cell_backgrounds_optimized {
+    let cell_color_mode = if args.fit_cell_backgrounds_metal {
+        CellColorMode::FitForegroundBackgroundMetal
+    } else if args.fit_cell_backgrounds_optimized {
         CellColorMode::FitForegroundBackgroundOptimized
     } else if args.fit_cell_backgrounds {
         CellColorMode::FitForegroundBackground
@@ -493,7 +500,7 @@ fn main() -> Result<()> {
 
     let bg_fit_quality = if args.fast {BgFitQuality::Fast} else {BgFitQuality::Fidelity};
     if (args.fast || args.fidelity) && !cell_color_mode.fits_cell_backgrounds() {
-        eprintln!("warning: --fast/--fidelity only affect cell-background fitting; pass --fit-cell-backgrounds or --fit-cell-backgrounds-optimized to use them.");
+        eprintln!("warning: --fast/--fidelity only affect cell-background fitting; select a --fit-cell-backgrounds mode to use them.");
     }
 
     // Create conversion options

@@ -172,6 +172,45 @@ scripts/compare_background_modes.sh input.mp4 /tmp/cascii-background-comparison 
 Arguments after the input are optional and represent output directory,
 columns, FPS, start time, and end time.
 
+## Experimental Metal background fitting (macOS)
+
+Build the optional Metal backend and select it explicitly:
+
+```bash
+cargo build --release --features metal
+target/release/cascii input.mp4 --out output --default --color-only --columns 160 --fit-cell-backgrounds-metal
+```
+
+The GPU kernel uses 32-bit floats. To preserve sensitive glyph/color choices, it
+marks nearly tied scores and rounding boundaries for correction by the original
+CPU fitter. Uniform-color results are cached across frames. Atlas preparation and
+CPU corrections still use the original double-precision arithmetic; there are no
+double-precision operations in the Metal shader. This remains experimental:
+the correction threshold is a heuristic, not a guarantee of byte-identical output
+for every possible input. Existing CPU modes are unchanged.
+
+`--fast`, `--fidelity`, and `--bg-luminance` also work with this mode. Small grids,
+short character ramps, and mostly invisible frames can be faster on the CPU.
+The GPU pipeline and shared input/output buffers are reused, and only one GPU
+submission is active at a time. Selecting Metal without macOS, a usable Metal
+device, or the build feature returns an error instead of silently changing modes.
+
+Generate comparison samples from an animation (at least six seconds long), plus
+a generated colorful test animation:
+
+```bash
+python3 scripts/compare_metal_animation.py resources/demo_01.gif --out target/metal-comparison
+```
+
+The script requires FFmpeg and creates a **new** output directory. It compares
+15 configurations covering columns, both analysis qualities, character ramps,
+font ratio, and independent foreground/background thresholds. It saves original
+and Metal `.cframe` files, lossless PNGs, timing/equality metrics in `summary.json`
+and `comparison.json`, and selected MP4 comparisons. Video panels are CPU, Metal,
+and an 8× amplified difference image, from left to right. Timings include resizing,
+GPU transfer/synchronization, and CPU correction, but exclude image decoding,
+file writes, rendering, and video encoding. Pipeline setup is reported separately.
+
 # Export Movie
 
 `cascii` can render ASCII art frames into an MP4 video file using `--to-video`. This works both from a source video (full pipeline) and from a directory of previously generated frames.
@@ -609,3 +648,9 @@ output for a single width. Existing scalar commands retain their normal layout.
 
 See [MULTISIZE.md](MULTISIZE.md) for the Rust and WASM APIs, format specification,
 resource limits, output paths, playback integration and test commands.
+
+### Per-frame size selections (schema 2)
+
+Multi-size manifests may carry `column_map`, one generated column count per logical frame. Version 2 requires this map; version 1 has no map and continues to use `default_columns`. The CSMV header version must match the manifest schema. All width variants remain in the asset, including those not selected by any frame. JSON and CSV-sidecar manifests use the same map.
+
+Playback follows the saved map by default, including after seeks. A manual size selection overrides the map until `follow_column_map()` (Rust) / `followColumnMap()` (JS) is called. `set_column_map()` / `setColumnMap()` applies a validated live map without changing the animation clock or playback state. Maps must match the frame count and contain only generated widths.

@@ -26,6 +26,8 @@ pub(crate) struct AsciiFrameData {
 pub(crate) enum BackgroundAnalysisContext {
     Legacy(render::BackgroundAnalysisContext),
     Optimized(background_fit_optimized::OptimizedBackgroundAnalysisContext),
+    #[cfg(all(feature = "metal", target_os = "macos"))]
+    Metal(crate::background_fit_metal::MetalBackgroundContext),
 }
 
 pub(crate) fn decoded_image_to_frame(image: &image::RgbImage, options: &crate::ConversionOptions, columns: u32, analysis: Option<&BackgroundAnalysisContext>) -> Result<AsciiFrameData> {
@@ -36,6 +38,8 @@ pub(crate) fn decoded_image_to_frame(image: &image::RgbImage, options: &crate::C
         }
         Some(BackgroundAnalysisContext::Legacy(context)) => render::fit_rgb_to_ascii_with_context(image.clone(), options.font_ratio, options.luminance, options.resolve_bg_threshold(), Some(columns), context),
         Some(BackgroundAnalysisContext::Optimized(context)) => background_fit_optimized::fit_rgb_to_ascii_with_context(image.clone(), options.font_ratio, options.luminance, options.resolve_bg_threshold(), Some(columns), context),
+        #[cfg(all(feature = "metal", target_os = "macos"))]
+        Some(BackgroundAnalysisContext::Metal(context)) => crate::background_fit_metal::fit_rgb_to_ascii_with_context(image.clone(), options.font_ratio, options.luminance, options.resolve_bg_threshold(), Some(columns), context),
     }
 }
 
@@ -44,6 +48,12 @@ pub(crate) fn background_analysis_for_mode(ascii_chars: &[u8], cell_color_mode: 
         CellColorMode::ForegroundOnly => Ok(None),
         CellColorMode::FitForegroundBackground => render::background_analysis_context(ascii_chars, bg_fit_quality).map(BackgroundAnalysisContext::Legacy).map(Some),
         CellColorMode::FitForegroundBackgroundOptimized => background_fit_optimized::background_analysis_context(ascii_chars, bg_fit_quality).map(BackgroundAnalysisContext::Optimized).map(Some),
+        CellColorMode::FitForegroundBackgroundMetal => {
+            #[cfg(all(feature = "metal", target_os = "macos"))]
+            {crate::background_fit_metal::background_analysis_context(ascii_chars, bg_fit_quality).map(BackgroundAnalysisContext::Metal).map(Some)}
+            #[cfg(not(all(feature = "metal", target_os = "macos")))]
+            {Err(anyhow!("Metal fitting requires macOS and a build with --features metal"))}
+        }
     }
 }
 
@@ -63,13 +73,27 @@ pub(crate) fn image_to_ascii_frame_data_with_analysis(img_path: &Path, font_rati
         CellColorMode::FitForegroundBackground => match background_analysis {
             Some(BackgroundAnalysisContext::Legacy(background_analysis)) => render::fit_image_to_ascii_with_cell_backgrounds_with_context(img_path, font_ratio, threshold, bg_threshold, columns, background_analysis),
             None => render::fit_image_to_ascii_with_cell_backgrounds(img_path, font_ratio, threshold, bg_threshold, columns, ascii_chars, bg_fit_quality),
-            Some(BackgroundAnalysisContext::Optimized(_)) => Err(anyhow!("legacy background mode received an optimized analysis context")),
+            Some(_) => Err(anyhow!("legacy background mode received a mismatched analysis context")),
         },
         CellColorMode::FitForegroundBackgroundOptimized => match background_analysis {
             Some(BackgroundAnalysisContext::Optimized(background_analysis)) => background_fit_optimized::fit_image_to_ascii_with_cell_backgrounds_with_context(img_path, font_ratio, threshold, bg_threshold, columns, background_analysis),
             None => background_fit_optimized::fit_image_to_ascii_with_cell_backgrounds(img_path, font_ratio, threshold, bg_threshold, columns, ascii_chars, bg_fit_quality),
-            Some(BackgroundAnalysisContext::Legacy(_)) => Err(anyhow!("optimized background mode received a legacy analysis context")),
+            Some(_) => Err(anyhow!("optimized background mode received a mismatched analysis context")),
         },
+        CellColorMode::FitForegroundBackgroundMetal => {
+            #[cfg(all(feature = "metal", target_os = "macos"))]
+            {
+                if let Some(BackgroundAnalysisContext::Metal(context)) = background_analysis {
+                    let image = image::open(img_path).with_context(|| format!("opening {}", img_path.display()))?.to_rgb8();
+                    return crate::background_fit_metal::fit_rgb_to_ascii_with_context(image, font_ratio, threshold, bg_threshold, columns, context);
+                }
+            }
+            if background_analysis.is_some() {
+                return Err(anyhow!("Metal background mode received a mismatched analysis context"));
+            }
+            let analysis = background_analysis_for_mode(ascii_chars, cell_color_mode, bg_fit_quality)?;
+            image_to_ascii_frame_data_with_analysis(img_path, font_ratio, threshold, bg_threshold, columns, ascii_chars, cell_color_mode, bg_fit_quality, analysis.as_ref())
+        }
     }
 }
 

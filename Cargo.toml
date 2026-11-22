@@ -1,6 +1,6 @@
 [package]
 name = "cascii"
-version = "0.33.0"
+version = "0.34.0"
 edition = "2021"
 authors = ["cascii contributors"]
 description = "High-performance ASCII art generator for images and videos"
@@ -43,6 +43,8 @@ default = ["cli"]
 # The filesystem/ffmpeg pipeline and interactive CLI. Disable (default-features = false) for a
 # wasm-compatible core exposing the in-memory single-image API in the `frame` module.
 cli = ["dep:ab_glyph", "dep:clap", "dep:dialoguer", "dep:dirs", "dep:indicatif", "dep:rayon", "dep:walkdir"]
+# Experimental macOS GPU fitter. Existing modes keep their original arithmetic.
+metal = ["cli", "dep:objc2", "dep:objc2-foundation", "dep:objc2-metal"]
 
 [dependencies]
 ab_glyph = { version = "0.2", optional = true }
@@ -57,6 +59,11 @@ dirs = { version = "5", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", optional = true }
+objc2-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "NSString", "NSError", "NSObject"] }
+objc2-metal = { version = "0.3.2", optional = true, default-features = false, features = ["std", "MTLDevice", "MTLBuffer", "MTLResource", "MTLCommandQueue", "MTLCommandBuffer", "MTLCommandEncoder", "MTLComputeCommandEncoder", "MTLComputePipeline", "MTLLibrary", "MTLTypes"] }
 
 [dev-dependencies]
 tempfile = "3"

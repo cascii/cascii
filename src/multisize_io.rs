@@ -81,7 +81,7 @@ impl AsciiConverter {
         let analysis = background_analysis_for_mode(options.conversion.ascii_chars.as_bytes(), analysis_mode, options.conversion.bg_fit_quality)?;
         let mut manifest = MultiSizeManifest {
             format: "cascii-multisize".to_string(), schema_version: 1, frame_count, fps: options.video.fps,
-            default_columns: options.sizes.largest(), font_ratio: options.conversion.font_ratio, luminance: options.conversion.luminance,
+            default_columns: options.sizes.largest(), column_map: None, font_ratio: options.conversion.font_ratio, luminance: options.conversion.luminance,
             ascii_chars: options.conversion.ascii_chars.clone(), text, color, audio: None,
             outputs: [MultiSizeFormat::Directory, MultiSizeFormat::Binary, MultiSizeFormat::Json, MultiSizeFormat::Csv].into_iter().filter(|format| options.formats.contains(format)).map(|format| match format {
                 MultiSizeFormat::Directory => "variants/", MultiSizeFormat::Binary => "frames.bin", MultiSizeFormat::Json => "frames.json", MultiSizeFormat::Csv => "frames.csv",

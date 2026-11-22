@@ -8,7 +8,7 @@ pub const MAX_COLUMNS: u32 = 4096;
 pub const MAX_VARIANTS: usize = 256;
 pub const MAX_FRAME_CELLS: u64 = 16_777_216;
 pub const ASSET_MAGIC: &[u8; 4] = b"CSMV";
-pub const ASSET_VERSION: u32 = 1;
+pub const ASSET_VERSION: u32 = 2;
 pub const ASSET_HEADER_BYTES: usize = 16;
 pub const ASSET_INDEX_BYTES: usize = 24;
 
@@ -70,6 +70,8 @@ pub struct MultiSizeManifest {
     pub frame_count: u32,
     pub fps: u32,
     pub default_columns: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column_map: Option<Vec<u32>>,
     pub font_ratio: f32,
     pub luminance: u8,
     pub ascii_chars: String,
@@ -82,7 +84,7 @@ pub struct MultiSizeManifest {
 
 impl MultiSizeManifest {
     pub fn validate(&self) -> Result<()> {
-        ensure!(self.format == "cascii-multisize" && self.schema_version == ASSET_VERSION, "unsupported multi-size asset format/version");
+        ensure!(self.format == "cascii-multisize" && (1..=ASSET_VERSION).contains(&self.schema_version), "unsupported multi-size asset format/version");
         ensure!(self.frame_count > 0 && self.frame_count <= 1_000_000 && self.fps > 0 && self.fps <= 1000, "invalid frame count or FPS");
         ensure!(self.font_ratio.is_finite() && self.font_ratio > 0.0, "invalid font ratio");
         ensure!(self.text || self.color, "asset has no frame output");
@@ -96,6 +98,10 @@ impl MultiSizeManifest {
         let normalized = ColumnSizes::new(columns.clone())?;
         ensure!(normalized.values() == columns, "variants must have unique ascending column counts");
         ensure!(columns.contains(&self.default_columns), "default size is missing");
+        ensure!(self.column_map.is_some() == (self.schema_version == 2), "schema 2 requires a per-frame column map; schema 1 cannot carry one");
+        if let Some(map) = &self.column_map {
+            ensure!(map.len() == self.frame_count as usize && map.iter().all(|n| columns.contains(n)), "invalid per-frame column map");
+        }
         for variant in &self.variants {
             ensure!(variant.rows.len() == self.frame_count as usize, "variant frame count mismatch");
             ensure!(variant.rows.iter().all(|&rows| rows > 0 && u64::from(rows) * u64::from(variant.columns) <= MAX_FRAME_CELLS), "invalid or excessive frame dimensions");
@@ -181,7 +187,7 @@ where W: Write + Seek, F: FnMut(u32, u32) -> Result<StoredFrame> {
     let metadata_len = u32::try_from(json.len())?;
     let entry_count = u32::try_from(count)?;
     writer.write_all(ASSET_MAGIC)?;
-    writer.write_all(&ASSET_VERSION.to_le_bytes())?;
+    writer.write_all(&manifest.schema_version.to_le_bytes())?;
     writer.write_all(&metadata_len.to_le_bytes())?;
     writer.write_all(&entry_count.to_le_bytes())?;
     writer.write_all(&json)?;
@@ -221,7 +227,7 @@ pub struct MultiSizeArchive<'a> {
 impl<'a> MultiSizeArchive<'a> {
     pub fn parse(bytes: &'a [u8]) -> Result<Self> {
         ensure!(bytes.len() >= ASSET_HEADER_BYTES && &bytes[..4] == ASSET_MAGIC, "invalid multi-size binary header");
-        ensure!(read_u32(bytes, 4)? == ASSET_VERSION, "unsupported binary asset version");
+        ensure!((1..=ASSET_VERSION).contains(&read_u32(bytes, 4)?), "unsupported binary asset version");
         let metadata_len = read_u32(bytes, 8)? as usize;
         ensure!(metadata_len > 0 && metadata_len <= 16 * 1024 * 1024, "excessive manifest length");
         let count = read_u32(bytes, 12)? as usize;
@@ -230,6 +236,7 @@ impl<'a> MultiSizeArchive<'a> {
         ensure!(payload_start <= bytes.len(), "truncated asset metadata/index");
         let manifest: MultiSizeManifest = serde_json::from_slice(&bytes[ASSET_HEADER_BYTES..metadata_end])?;
         manifest.validate()?;
+        ensure!(manifest.schema_version == read_u32(bytes, 4)?, "binary header and schema version mismatch");
         ensure!(count == manifest.frame_count as usize * manifest.variants.len(), "asset index count mismatch");
         let payload = &bytes[payload_start..];
         let mut entries = Vec::with_capacity(count);
